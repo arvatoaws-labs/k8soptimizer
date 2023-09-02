@@ -316,7 +316,7 @@ def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
         _logger.debug(deployment)
         deployment_name = deployment.metadata.name
 
-        x = re.search(DEPLOYMENT_FILTER, deployment_name)
+        x = re.search(deployment_filter, deployment_name)
         if x == None:
             _logger.debug(
                 "Skipping deployment due to DEPLOYMENT_FILTER: %s" % deployment_name
