@@ -34,6 +34,8 @@ from kubernetes import client, config
 
 from k8soptimizer import __version__
 
+from . import helpers
+
 __author__ = "Philipp Hellmich"
 __copyright__ = "Philipp Hellmich"
 __license__ = "MIT"
@@ -44,14 +46,6 @@ _logger = logging.getLogger(__name__)
 config.load_kube_config()
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
-PROMETHEUS_QUERY_MEMORY = os.getenv(
-    "PROMETHEUS_QUERY_MEMORY",
-    'round(max by (container,namespace) (round((1 * avg(quantile_over_time(.95,container_memory_working_set_bytes{container!="POD",container!=""}[7d])) by (container,pod,namespace)))))',
-)
-PROMETHEUS_QUERY_CPU = os.getenv(
-    "PROMETHEUS_QUERY_CPU",
-    'avg by (container, namespace) (irate(container_cpu_usage_seconds_total{container!="",container!="POD"}[5m]))',
-)
 
 NAMESPACE_FILTER = os.getenv("NAMESPACE_FILTER", ".*")
 DEPLOYMENT_FILTER = os.getenv("DEPLOYMENT_FILTER", ".*")
@@ -66,58 +60,13 @@ MEMORY_LIMIT_MIN = int(os.getenv("MEMORY_LIMIT_MIN", 1024**2 * 128))
 MEMORY_LIMIT_MAX = int(os.getenv("MEMORY_LIMIT_MAX", 1024**3 * 32))
 MEMORY_LIMIT_RATIO = int(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
 
-
 CHANGE_MIN = os.getenv("CHANGE_MIN", 0.1)
-
 
 # ---- Python API ----
 # The functions defined in this section can be imported by users in their
 # Python scripts/interactive interpreter, e.g. via
 # `from k8soptimizer.skeleton import fib`,
 # when using this Python module as a library.
-
-
-def convert_to_bytes(size_str):
-    units = {
-        "B": 1,
-        "K": 1024,
-        "M": 1024**2,
-        "G": 1024**3,
-        "Ki": 1024,
-        "Mi": 1024**2,
-        "Gi": 1024**3,
-        "Ti": 1024**4,
-    }
-
-    pattern = r"(\d+(\.\d+)?)\s*([a-zA-Z]+)"
-    match = re.match(pattern, size_str)
-
-    if match:
-        value = float(match.group(1))
-        unit = match.group(3)
-    else:
-        raise ValueError("Invalid format")
-
-    if unit not in units:
-        raise ValueError("Invalid unit")
-
-    bytes_value = value * units[unit]
-    return int(bytes_value)
-
-
-def convert_to_number(value_str):
-    units = {"m": 1 / 1000, "k": 1000, "": 1}
-
-    value_str = value_str.strip()
-    unit = value_str[-1]
-    value = float(value_str[:-1])
-
-    if unit not in units:
-        raise ValueError("Invalid unit")
-
-    number_value = value * units[unit]
-    return number_value
-
 
 def format_pairs(value_array):
     formatted_pairs = []
@@ -130,7 +79,6 @@ def get_max_cpu_cores_per_technology(technology):
     if technology == "nodejs":
         return 1
     return 100
-
 
 def get_max_pods_per_deployment_history(
     namespace_name, deployment_name, history_days="7d", quantile_over_time="0.95"
@@ -223,18 +171,8 @@ def is_nodejs_container(namespace, workload, container, workload_type="deploymen
 
     return False
 
-
-def get_hpa_target_ratio(namespace_name, deployment_name):
+def get_hpa_for_deployment(namespace_name, deployment_name):
     autoscaling_api = client.AutoscalingV2Api()
-    hpa_ratio_addon = 0
-    hpa_enabled = False
-    hpa_min_replica = 0
-    hpa_max_replica = 0
-    hpa_range = 0
-    hpa_target_cpu = None
-    hpa_target_memory = None
-    target_ratio_cpu = 1
-    target_ratio_memory = 1
     for hpa in autoscaling_api.list_namespaced_horizontal_pod_autoscaler(
         namespace=namespace_name
     ).items:
@@ -242,41 +180,58 @@ def get_hpa_target_ratio(namespace_name, deployment_name):
             continue
         if hpa.spec.scale_target_ref.name != deployment_name:
             continue
-        hpa_enabled = True
-        hpa_min_replica = hpa.spec.min_replicas
-        hpa_max_replica = hpa.spec.max_replicas
-        hpa_range = hpa_max_replica - hpa_min_replica
-        for metric in hpa.spec.metrics:
-            if metric.type != "Resource":
-                continue
-            if metric.resource.name == "cpu":
-                hpa_target_cpu = metric.resource.target.average_utilization / 100
-                target_ratio_cpu = round(1 / hpa_target_cpu, 2)
-                _logger.info(
-                    "Changing target ratio cpu to match hpa utilization: %s"
-                    % target_ratio_cpu
-                )
-            if metric.resource.name == "memory":
-                hpa_target_memory = metric.resource.target.average_utilization / 100
-                target_ratio_memory = round(1 / hpa_target_memory, 2)
-                _logger.info(
-                    "Changing target ratio memory to match hpa utilization: %s"
-                    % target_ratio_memory
-                )
+        return hpa
+    return None
 
-    if hpa_enabled == True:
-        replica_count_history = get_max_pods_per_deployment_history(
-            namespace_name, deployment_name
-        )
-        _logger.info("Hpa min repliacs: %s" % hpa_min_replica)
-        _logger.info("Hpa max replicas: %s" % hpa_max_replica)
-        _logger.info("Hpa avg count history: %s" % replica_count_history)
-        # increase request if hpa is enabled and current replica count is higher than min replica count
-        if replica_count_history > hpa_min_replica and hpa_range > 0:
-            _logger.info("Hpa avg range: %s" % hpa_range)
-            hpa_range_position = replica_count_history - hpa_min_replica
-            _logger.info("Hpa avg range position: %s" % hpa_range_position)
-            hpa_ratio_addon = round((hpa_range_position) / hpa_range, 2)
+def is_hpa_enabled_for_deployment(namespace_name, deployment_name):
+    return get_hpa_for_deployment(namespace_name, deployment_name) is not None
+
+def calculate_hpa_target_ratio(namespace_name, deployment_name):
+    hpa_ratio_addon = 0
+    hpa_min_replica = 0
+    hpa_max_replica = 0
+    hpa_range = 0
+    target_ratio_cpu = 1
+    target_ratio_memory = 1
+
+    hpa = get_hpa_for_deployment(namespace_name, deployment_name)
+    if hpa is None:
+        return {target_ratio_cpu, target_ratio_memory}
+
+    hpa_min_replica = hpa.spec.min_replicas
+    hpa_max_replica = hpa.spec.max_replicas
+    hpa_range = hpa_max_replica - hpa_min_replica
+    for metric in hpa.spec.metrics:
+        if metric.type != "Resource":
+            continue
+        if metric.resource.name == "cpu":
+            hpa_target_cpu = metric.resource.target.average_utilization / 100
+            target_ratio_cpu = round(1 / hpa_target_cpu, 2)
+            _logger.info(
+                "Changing target ratio cpu to match hpa utilization: %s"
+                % target_ratio_cpu
+            )
+        if metric.resource.name == "memory":
+            hpa_target_memory = metric.resource.target.average_utilization / 100
+            target_ratio_memory = round(1 / hpa_target_memory, 2)
+            _logger.info(
+                "Changing target ratio memory to match hpa utilization: %s"
+                % target_ratio_memory
+            )
+
+    replica_count_history = get_max_pods_per_deployment_history(
+        namespace_name, deployment_name
+    )
+
+    _logger.info("Hpa min repliacs: %s" % hpa_min_replica)
+    _logger.info("Hpa max replicas: %s" % hpa_max_replica)
+    _logger.info("Hpa avg count history: %s" % replica_count_history)
+    # increase request if hpa is enabled and current replica count is higher than min replica count
+    if replica_count_history > hpa_min_replica and hpa_range > 0:
+        _logger.info("Hpa avg range: %s" % hpa_range)
+        hpa_range_position = replica_count_history - hpa_min_replica
+        _logger.info("Hpa avg range position: %s" % hpa_range_position)
+        hpa_ratio_addon = round((hpa_range_position) / hpa_range, 2)
 
     if hpa_ratio_addon > 0.5:
         _logger.info(
@@ -285,7 +240,7 @@ def get_hpa_target_ratio(namespace_name, deployment_name):
         target_ratio_cpu = round(target_ratio_cpu + hpa_ratio_addon, 3)
         target_ratio_memory = round(target_ratio_memory + hpa_ratio_addon, 3)
 
-    return {target_ratio_cpu, target_ratio_memory}
+    return {"cpu": target_ratio_cpu, "memory": target_ratio_memory}
 
 
 def get_namespaces(namespace_filter=".*"):
@@ -333,6 +288,96 @@ def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
 
     return resp_rs
 
+def query_promtheus(query):
+    logging.debug(query)
+    response = requests.get(
+        PROMETHEUS_URL + "/api/v1/query", params={"query": query}
+    )
+    j = json.loads(response.text)
+    logging.debug(j)
+    return j
+
+def get_max_pods_per_deployment_history(
+    namespace_name,
+    deployment_name,
+    history_days="7d",
+    quantile_over_time="0.95",
+):
+    query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{history_days}]))'.format(
+        quantile_over_time=quantile_over_time,
+        namespace_name=namespace_name,
+        deployment_name=deployment_name,
+        history_days=history_days,
+    )
+    j = query_promtheus(query)
+
+    if j["data"]["result"] == []:
+        raise RuntimeError("No data found for prometheus query: {}".format(query))
+    return int(j["data"]["result"][0]["value"][1])
+
+def get_cpu_cores_usage_history(
+    namespace,
+    workload,
+    container,
+    workload_type="deployment",
+    history_days="7d",
+    quantile_over_time="0.95",
+):
+    query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{history_days}])'.format(
+        quantile_over_time=quantile_over_time,
+        namespace=namespace,
+        workload=workload,
+        workload_type=workload_type,
+        container=container,
+        history_days=history_days,
+    )
+    j = query_promtheus(query)
+
+    if j["data"]["result"] == []:
+        raise RuntimeError("No data found for prometheus query: {}".format(query))
+    return float(j["data"]["result"][0]["value"][1])
+
+def get_memory_bytes_usage_history(
+    namespace,
+    workload,
+    container,
+    workload_type="deployment",
+    history_days="7d",
+    quantile_over_time="0.95",
+):
+    query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{history_days}])'.format(
+        quantile_over_time=quantile_over_time,
+        namespace=namespace,
+        workload=workload,
+        workload_type=workload_type,
+        container=container,
+        history_days=history_days,
+    )
+    j = query_promtheus(query)
+
+    if j["data"]["result"] == []:
+        raise RuntimeError("No data found for prometheus query: {}".format(query))
+    return float(j["data"]["result"][0]["value"][1])
+
+def is_nodejs_container(
+    namespace, workload, container, workload_type="deployment"
+):
+    query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
+        namespace=namespace,
+        workload=workload,
+        workload_type=workload_type,
+        container=container,
+    )
+    j = query_promtheus(query)
+
+    if j["data"]["result"] == []:
+        return False
+
+    if float(j["data"]["result"][0]["value"][1]) > 0:
+        return True
+
+    return False
+
 # ---- CLI ----
 # The functions defined in this section are wrappers around the main Python
 # API allowing them to be called directly from the terminal as a CLI
@@ -379,7 +424,7 @@ def setup_logging(loglevel):
     """Setup basic logging
 
     Args:
-      loglevel (int): minimum loglevel for emitting messages
+        loglevel (int): minimum loglevel for emitting messages
     """
     logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
     logging.basicConfig(
@@ -394,8 +439,8 @@ def main(args):
     ``stdout`` in a nicely formatted message.
 
     Args:
-      args (List[str]): command line parameters as list of strings
-          (for example  ``["--verbose", "42"]``).
+        args (List[str]): command line parameters as list of strings
+            (for example  ``["--verbose", "42"]``).
     """
     args = parse_args(args)
     setup_logging(args.loglevel)
@@ -466,7 +511,7 @@ def main(args):
             _logger.info("Inital target ratio memory: %s" % target_ratio_memory)
 
             # TODO OOM addon
-            target_ratio_cpu, target_ratio_memory = get_hpa_target_ratio(
+            target_ratio_cpu, target_ratio_memory = calculate_hpa_target_ratio(
                 namespace_name, deployment_name
             )
 

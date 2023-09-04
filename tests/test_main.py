@@ -214,10 +214,287 @@ def test_get_deployments(mock_requests_get):
 
     # Call the function under test
     result = main.get_deployments(
-        "default" "deploymentX",
+        "default", "deploymentX"
     )
 
     assert len(result) == 0  # Check if the result is as expected
+
+
+@patch(
+    "k8soptimizer.main.client.AutoscalingV2Api.list_namespaced_horizontal_pod_autoscaler"
+)  # Mock the requests.get function
+def test_get_hpa_for_deployment(mock_requests_get):
+    hpa1 = V2HorizontalPodAutoscaler(
+        metadata=V1ObjectMeta(
+            name="deployment1"
+        ),
+        spec=V2HorizontalPodAutoscalerSpec(
+            max_replicas=10,
+            min_replicas=1,
+            metrics=[
+                V2MetricSpec(
+                    type="Resource",
+                    resource=V2ResourceMetricSource(
+                        name="cpu",
+                        target=V2MetricTarget(average_utilization=80,type='Utilization')
+                    )
+                )
+            ],
+            scale_target_ref=V2CrossVersionObjectReference(
+                kind="Deployment",
+                name="deployment1"
+            )
+        )
+    )
+
+    hpa2 = V2HorizontalPodAutoscaler(
+        metadata=V1ObjectMeta(
+            name="deployment2"
+        ),
+        spec=V2HorizontalPodAutoscalerSpec(
+            max_replicas=10,
+            min_replicas=1,
+            metrics=[
+                V2MetricSpec(
+                    type="Resource",
+                    resource=V2ResourceMetricSource(
+                        name="cpu",
+                        target=V2MetricTarget(average_utilization=80,type='Utilization')
+                    )
+                )
+            ],
+            scale_target_ref=V2CrossVersionObjectReference(
+                kind="Deployment",
+                name="deployment2"
+            )
+        )
+    )
+    hpa_list = V2HorizontalPodAutoscalerList(items=[hpa1, hpa2])
+
+    mock_requests_get.return_value = hpa_list
+
+    # Call the function under test
+    result = main.get_hpa_for_deployment("default", "deployment1")
+
+    assert result is not None
+
+    assert result.metadata.name == "deployment1"
+
+
+
+@patch("k8soptimizer.main.get_max_pods_per_deployment_history")
+@patch("k8soptimizer.main.get_hpa_for_deployment")
+def test_calculate_hpa_target_ratio(mock_func1, mock_func2):
+
+    hpa1 = V2HorizontalPodAutoscaler(
+        metadata=V1ObjectMeta(
+            name="deployment1"
+        ),
+        spec=V2HorizontalPodAutoscalerSpec(
+            max_replicas=10,
+            min_replicas=1,
+            metrics=[
+                V2MetricSpec(
+                    type="Resource",
+                    resource=V2ResourceMetricSource(
+                        name="cpu",
+                        target=V2MetricTarget(average_utilization=80,type='Utilization')
+                    )
+                ),
+                V2MetricSpec(
+                    type="Resource",
+                    resource=V2ResourceMetricSource(
+                        name="memory",
+                        target=V2MetricTarget(average_utilization=80,type='Utilization')
+                    )
+                )
+            ],
+            scale_target_ref=V2CrossVersionObjectReference(
+                kind="Deployment",
+                name="deployment1"
+            )
+        )
+    )
+
+    mock_func1.return_value = hpa1
+    mock_func2.return_value = 3
+
+    # Call the function under test
+    result = main.calculate_hpa_target_ratio("default", "deployment1")
+
+    assert result['cpu'] == 1.25
+    assert result['memory'] == 1.25
+
+    hpa1 = V2HorizontalPodAutoscaler(
+        metadata=V1ObjectMeta(
+            name="deployment1"
+        ),
+        spec=V2HorizontalPodAutoscalerSpec(
+            max_replicas=10,
+            min_replicas=1,
+            metrics=[
+                V2MetricSpec(
+                    type="Resource",
+                    resource=V2ResourceMetricSource(
+                        name="cpu",
+                        target=V2MetricTarget(average_utilization=100,type='Utilization')
+                    )
+                )
+            ],
+            scale_target_ref=V2CrossVersionObjectReference(
+                kind="Deployment",
+                name="deployment1"
+            )
+        )
+    )
+
+    mock_func1.return_value = hpa1
+    mock_func2.return_value = 3
+
+    # Call the function under test
+    result = main.calculate_hpa_target_ratio("default", "deployment1")
+
+    assert result['cpu'] == 1
+    assert result['memory'] == 1
+
+    hpa1 = V2HorizontalPodAutoscaler(
+        metadata=V1ObjectMeta(
+            name="deployment1"
+        ),
+        spec=V2HorizontalPodAutoscalerSpec(
+            max_replicas=10,
+            min_replicas=1,
+            metrics=[
+                V2MetricSpec(
+                    type="Resource",
+                    resource=V2ResourceMetricSource(
+                        name="cpu",
+                        target=V2MetricTarget(average_utilization=100,type='Utilization')
+                    )
+                )
+            ],
+            scale_target_ref=V2CrossVersionObjectReference(
+                kind="Deployment",
+                name="deployment1"
+            )
+        )
+    )
+
+    mock_func1.return_value = hpa1
+    mock_func2.return_value = 9
+
+    # Call the function under test
+    result = main.calculate_hpa_target_ratio("default", "deployment1")
+
+    assert result['cpu'] == 1.89
+    assert result['memory'] == 1
+
+# @patch(
+#     "k8soptimizer.main.client.AutoscalingV2Api.list_namespaced_horizontal_pod_autoscaler"
+# )  # Mock the requests.get function
+# def test_get_target_ratio(mock_requests_get):
+#     hpa1 = V2HorizontalPodAutoscaler(
+#         spec=V2HorizontalPodAutoscalerSpec(max_replicas=10,
+#                                            min_replicas=1,
+#                                            metrics=[
+#                                                V2MetricSpec(type="Resource",
+#                                                             resource=V2ResourceMetricSource(name="cpu",target=V2MetricTarget(average_utilization=80)))
+#                                            ]
+#                                            scale_target_ref=V2CrossVersionObjectReference(
+#                                                kind="deployment",
+#                                                name="deployment1"
+#                                            ))
+#     )
+
+#     # Define a list of V1Namespace objects
+#     deployment1 = V1Deployment(
+#         metadata=V1ObjectMeta(
+#             name="deployment1",
+#         ),
+#         spec=V1DeploymentSpec(
+#             replicas=1,
+#             selector=V1LabelSelector(match_labels={"app": "nginx"}),
+#             template=V1PodTemplateSpec(
+#                 spec=V1PodSpec(
+#                     containers=[
+#                         V1Container(
+#                             name="nginx",
+#                             resources=V1ResourceRequirements(
+#                                 requests={"cpu": "1"}, limits={"cpu": "1"}
+#                             ),
+#                         )
+#                     ]
+#                 )
+#             ),
+#         ),
+#     )
+#     deployment2 = V1Deployment(
+#         metadata=V1ObjectMeta(
+#             name="deployment2",
+#         ),
+#         spec=V1DeploymentSpec(
+#             replicas=2,
+#             selector=V1LabelSelector(match_labels={"app": "nginx"}),
+#             template=V1PodTemplateSpec(
+#                 spec=V1PodSpec(
+#                     containers=[
+#                         V1Container(
+#                             name="nginx",
+#                             resources=V1ResourceRequirements(limits={"cpu": "2"}),
+#                         )
+#                     ]
+#                 )
+#             ),
+#         ),
+#     )
+#     deployment3 = V1Deployment(
+#         metadata=V1ObjectMeta(
+#             name="deployment3",
+#         ),
+#         spec=V1DeploymentSpec(
+#             replicas=0,
+#             selector=V1LabelSelector(match_labels={"app": "nginx"}),
+#             template=V1PodTemplateSpec(
+#                 spec=V1PodSpec(
+#                     containers=[
+#                         V1Container(
+#                             name="nginx",
+#                             resources=V1ResourceRequirements(limits={"cpu": "1"}),
+#                         )
+#                     ]
+#                 )
+#             ),
+#         ),
+#     )
+#     deployment_list = V1DeploymentList(items=[deployment1, deployment2, deployment3])
+
+#     mock_requests_get.return_value = deployment_list
+
+#     # Call the function under test
+#     result = main.get_deployments("default", ".*")
+
+#     # Verify that the function behaves as expected
+#     assert len(result) == 2  # Check if the result is as expected
+
+#     # Define a list of V1Namespace objects
+#     deployment_list = V1DeploymentList(items=[deployment1, deployment2])
+
+#     mock_requests_get.return_value = deployment_list
+
+#     # Call the function under test
+#     result = main.get_deployments("default", "^deployment1$")
+
+#     assert len(result) == 1  # Check if the result is as expected
+#     assert (
+#         result[0].metadata.name == "deployment1"
+#     )  # Check if the result is as expected
+
+#     # Call the function under test
+#     result = main.get_deployments(
+#         "default", "deploymentX"
+#     )
+
+#     assert len(result) == 0  # Check if the result is as expected
 
 
 def test_get_max_cpu_cores_per_technology():
