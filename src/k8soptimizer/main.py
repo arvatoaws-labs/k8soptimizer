@@ -446,7 +446,6 @@ def get_oom_killed_history(
     lookback_minutes=3600 * 24 * 7,
 ):
     query = 'sum_over_time(kube_workload_container_resource_usage_memory_oom_killed{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
-        quantile_over_time=quantile_over_time,
         namespace=namespace,
         workload=workload,
         workload_type=workload_type,
@@ -556,6 +555,7 @@ def optimze_deplayment(deployment, dry_run=True):
     # Apply the changes
     if dry_run == True:
         _logger.info("Updating deployment: %s" % deployment_name)
+        # FIXME add last update annotation
         apis_api.patch_namespaced_deployment(
             name=deployment_name, namespace=namespace_name, body=deployment, pretty=True
         )

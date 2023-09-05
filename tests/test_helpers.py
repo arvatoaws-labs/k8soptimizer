@@ -42,4 +42,5 @@ def test_convert_to_number():
 
 
 def format_pairs():
-    assert helpers.format_pairs({"name": "otto"}) == 1
+    assert helpers.format_pairs({"name": "otto"}) == "name=otto"
+    assert helpers.format_pairs({"name": "otto", "age": 6}) == "name=otto, age=6"
