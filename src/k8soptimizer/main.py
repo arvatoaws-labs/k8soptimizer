@@ -69,22 +69,30 @@ CHANGE_MIN = os.getenv("CHANGE_MIN", 0.1)
 # `from k8soptimizer.skeleton import fib`,
 # when using this Python module as a library.
 
-def query_promtheus(query):
+
+def query_prometheus(query):
     _logger.debug(query)
-    response = requests.get(
-        PROMETHEUS_URL + "/api/v1/query", params={"query": query}
-    )
+    response = requests.get(PROMETHEUS_URL + "/api/v1/query", params={"query": query})
     j = json.loads(response.text)
     _logger.debug(j)
+    if "data" not in j:
+        raise RuntimeError("Got invalid results from query: {}".format(query))
+    if "result" not in j["data"]:
+        raise RuntimeError("Got invalid results from query: {}".format(query))
     return j
+
 
 def get_max_cpu_cores_per_runtime(runtime):
     if runtime == "nodejs":
         return 1
     return 100
 
+
 def get_max_pods_per_deployment_history(
-    namespace_name, deployment_name, lookback_minutes=3600*24*7, quantile_over_time=0.95
+    namespace_name,
+    deployment_name,
+    lookback_minutes=3600 * 24 * 7,
+    quantile_over_time=0.95,
 ):
     query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{lookback_minutes}m]))'.format(
         quantile_over_time=quantile_over_time,
@@ -92,7 +100,7 @@ def get_max_pods_per_deployment_history(
         deployment_name=deployment_name,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
@@ -104,7 +112,7 @@ def get_cpu_cores_usage_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600*24*7,
+    lookback_minutes=3600 * 24 * 7,
     quantile_over_time=0.95,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
@@ -115,7 +123,7 @@ def get_cpu_cores_usage_history(
         container=container,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
@@ -127,7 +135,7 @@ def get_memory_bytes_usage_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600*24*7,
+    lookback_minutes=3600 * 24 * 7,
     quantile_over_time=0.95,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
@@ -138,17 +146,20 @@ def get_memory_bytes_usage_history(
         container=container,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
 
 
-def discover_container_runtime(namespace, workload, container, workload_type="deployment"):
-    if (is_nodejs_container(namespace, workload, container, workload_type="deployment")):
-        return 'nodejs'
+def discover_container_runtime(
+    namespace, workload, container, workload_type="deployment"
+):
+    if is_nodejs_container(namespace, workload, container, workload_type):
+        return "nodejs"
     return None
+
 
 def is_nodejs_container(namespace, workload, container, workload_type="deployment"):
     query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
@@ -157,7 +168,7 @@ def is_nodejs_container(namespace, workload, container, workload_type="deploymen
         workload_type=workload_type,
         container=container,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         return False
@@ -166,6 +177,7 @@ def is_nodejs_container(namespace, workload, container, workload_type="deploymen
         return True
 
     return False
+
 
 def get_hpa_for_deployment(namespace_name, deployment_name):
     autoscaling_api = client.AutoscalingV2Api()
@@ -179,10 +191,14 @@ def get_hpa_for_deployment(namespace_name, deployment_name):
         return hpa
     return None
 
+
 def is_hpa_enabled_for_deployment(namespace_name, deployment_name):
     return get_hpa_for_deployment(namespace_name, deployment_name) is not None
 
-def calculate_hpa_target_ratio(namespace_name, deployment_name, lookback_minutes = 3600 * 24 * 7):
+
+def calculate_hpa_target_ratio(
+    namespace_name, deployment_name, lookback_minutes=3600 * 24 * 7
+):
     hpa_ratio_addon = 0
     hpa_min_replica = 0
     hpa_max_replica = 0
@@ -215,13 +231,15 @@ def calculate_hpa_target_ratio(namespace_name, deployment_name, lookback_minutes
                 % target_ratio_memory
             )
 
-    replica_count_history = round(get_max_pods_per_deployment_history(
-        namespace_name, deployment_name, lookback_minutes
-    ))
+    replica_count_history = round(
+        get_max_pods_per_deployment_history(
+            namespace_name, deployment_name, lookback_minutes
+        )
+    )
 
-    oom_killed_history = round(get_oom_killed_history(
-        namespace_name, deployment_name, lookback_minutes
-    ))
+    oom_killed_history = round(
+        get_oom_killed_history(namespace_name, deployment_name, lookback_minutes)
+    )
 
     _logger.debug("Hpa min repliacs: %s" % hpa_min_replica)
     _logger.debug("Hpa max replicas: %s" % hpa_max_replica)
@@ -246,7 +264,10 @@ def calculate_hpa_target_ratio(namespace_name, deployment_name, lookback_minutes
 
     return {"cpu": target_ratio_cpu, "memory": target_ratio_memory}
 
-def calculate_cpu_requests(namespace_name, workload, workload_type, container_name, target_ratio_cpu):
+
+def calculate_cpu_requests(
+    namespace_name, workload, workload_type, container_name, target_ratio_cpu
+):
     new_cpu = round(
         max(
             CPU_MIN,
@@ -263,13 +284,18 @@ def calculate_cpu_requests(namespace_name, workload, workload_type, container_na
         ),
         3,
     )
-    runtime = discover_container_runtime(namespace_name, workload, container_name, workload_type)
-    if runtime == 'nodejs':
+    runtime = discover_container_runtime(
+        namespace_name, workload, container_name, workload_type
+    )
+    if runtime == "nodejs":
         new_cpu = min(CPU_MAX_NODEJS, new_cpu)
 
     return new_cpu
 
-def calculate_memory_requests(namespace_name, workload, workload_type, container_name, target_ratio_memory):
+
+def calculate_memory_requests(
+    namespace_name, workload, workload_type, container_name, target_ratio_memory
+):
     new_memory = round(
         max(
             MEMORY_MIN,
@@ -288,13 +314,17 @@ def calculate_memory_requests(namespace_name, workload, workload_type, container
 
     return new_memory
 
-def calculate_memory_limits(namespace_name, workload, workload_type, container, memory_requests):
+
+def calculate_memory_limits(
+    namespace_name, workload, workload_type, container, memory_requests
+):
     container_name = container.name
     new_memory_limit = max(
         MEMORY_LIMIT_MIN,
         min(MEMORY_LIMIT_MAX, memory_requests * MEMORY_LIMIT_RATIO),
     )
     return new_memory_limit
+
 
 def get_namespaces(namespace_filter=".*"):
     core_api = client.CoreV1Api()
@@ -315,6 +345,7 @@ def get_namespaces(namespace_filter=".*"):
         resp_rs.append(namespace)
 
     return resp_rs
+
 
 def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
     apis_api = client.AppsV1Api()
@@ -341,10 +372,11 @@ def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
 
     return resp_rs
 
+
 def get_max_pods_per_deployment_history(
     namespace_name,
     deployment_name,
-    lookback_minutes=3600*24*7,
+    lookback_minutes=3600 * 24 * 7,
     quantile_over_time="0.95",
 ):
     query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{lookback_minutes}m]))'.format(
@@ -353,18 +385,19 @@ def get_max_pods_per_deployment_history(
         deployment_name=deployment_name,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return int(j["data"]["result"][0]["value"][1])
+
 
 def get_cpu_cores_usage_history(
     namespace,
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600*24*7,
+    lookback_minutes=3600 * 24 * 7,
     quantile_over_time="0.95",
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
@@ -375,18 +408,19 @@ def get_cpu_cores_usage_history(
         container=container,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
+
 
 def get_memory_bytes_usage_history(
     namespace,
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600*24*7,
+    lookback_minutes=3600 * 24 * 7,
     quantile_over_time=0.95,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
@@ -397,18 +431,19 @@ def get_memory_bytes_usage_history(
         container=container,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
+
 
 def get_oom_killed_history(
     namespace,
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600*24*7
+    lookback_minutes=3600 * 24 * 7,
 ):
     query = 'sum_over_time(kube_workload_container_resource_usage_memory_oom_killed{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
@@ -418,7 +453,7 @@ def get_oom_killed_history(
         container=container,
         lookback_minutes=lookback_minutes,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         return 0
@@ -428,16 +463,15 @@ def get_oom_killed_history(
 
     return 0
 
-def is_nodejs_container(
-    namespace, workload, container, workload_type="deployment"
-):
+
+def is_nodejs_container(namespace, workload, container, workload_type="deployment"):
     query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
         namespace=namespace,
         workload=workload,
         workload_type=workload_type,
         container=container,
     )
-    j = query_promtheus(query)
+    j = query_prometheus(query)
 
     if j["data"]["result"] == []:
         return False
@@ -446,6 +480,232 @@ def is_nodejs_container(
         return True
 
     return False
+
+
+def optimze_deplayment(deployment, dry_run=True):
+    apis_api = client.AppsV1Api()
+    _logger.info("Optimizing deployment: %s" % deployment_name)
+    namespace_name = deployment.metadata.namespace
+    deployment_name = deployment.metadata.name
+
+    _logger.debug("Checking deployment status")
+    latest_change = None
+    oldest_change = None
+    for condition in deployment.status.conditions:
+        if condition.last_update_time == None:
+            continue
+
+        if latest_change == None:
+            latest_change = datetime.datetime.fromtimestamp(
+                condition.last_update_time.timestamp()
+            )
+
+        if latest_change < datetime.datetime.fromtimestamp(
+            condition.last_update_time.timestamp()
+        ):
+            latest_change = datetime.datetime.fromtimestamp(
+                condition.last_update_time.timestamp()
+            )
+
+        if oldest_change == None:
+            oldest_change = datetime.datetime.fromtimestamp(
+                condition.last_update_time.timestamp()
+            )
+
+        if oldest_change > datetime.datetime.fromtimestamp(
+            condition.last_update_time.timestamp()
+        ):
+            oldest_change = datetime.datetime.fromtimestamp(
+                condition.last_update_time.timestamp()
+            )
+
+    _logger.debug("Oldest change: {}".format(oldest_change))
+    _logger.debug("Newest change: {}".format(latest_change))
+
+    if oldest_change > (
+        datetime.datetime.now() - datetime.timedelta(seconds=AGE_FILTER)
+    ):
+        _logger.info(
+            "Skipping deployment because of oldest change is too recent: {}".format(
+                oldest_change
+            )
+        )
+        return
+
+    target_ratio = calculate_hpa_target_ratio(namespace_name, deployment_name)
+
+    target_ratio_cpu = target_ratio["cpu"]
+    target_ratio_memory = target_ratio["memory"]
+
+    _logger.info("Target ratio cpu: %s" % target_ratio_cpu)
+    _logger.info("Target ratio memory: %s" % target_ratio_memory)
+    i = -1
+
+    for container in deployment.spec.template.spec.containers:
+        i = i + 1
+        container_new = optimize_container(
+            namespace_name,
+            deployment_name,
+            container,
+            "deployment",
+            target_ratio_cpu,
+            target_ratio_memory,
+        )
+        deployment.spec.template.spec[i] = container_new
+
+    # Apply the changes
+    if dry_run == True:
+        _logger.info("Updating deployment: %s" % deployment_name)
+        apis_api.patch_namespaced_deployment(
+            name=deployment_name, namespace=namespace_name, body=deployment, pretty=True
+        )
+
+
+def optimize_container(
+    namespace_name,
+    workload,
+    container,
+    workload_type="deployment",
+    target_ratio_cpu=1,
+    target_ratio_memory=1,
+):
+    container_name = container.name
+
+    _logger.info("Processing container: %s" % container_name)
+
+    new_cpu = optimize_container_cpu_requests(
+        namespace_name, workload, container, workload_type, target_ratio_cpu
+    )
+    new_memory = optimize_container_memory_requests(
+        namespace_name, workload, container, workload_type, target_ratio_memory
+    )
+    new_memory_limit = optimize_container_memory_limits(
+        namespace_name, workload, container, workload_type, target_ratio_memory
+    )
+
+    # old_cpu_sum += old_cpu * deployment.spec.replicas
+    # new_cpu_sum += new_cpu * deployment.spec.replicas
+    # old_memory_sum += old_memory * deployment.spec.replicas
+    # new_memory_sum += new_memory * deployment.spec.replicas
+
+    container.resources.requests["cpu"] = str(round(new_cpu * 1000)) + "Mi"
+    if "cpu" in container.resources.limits:
+        del container.resources.limits["cpu"]
+    container.resources.requests["memory"] = str(round(new_memory / 1024 / 1024)) + "Mi"
+    container.resources.limits["memory"] = (
+        str(round(new_memory_limit / 1024 / 1024)) + "Mi"
+    )
+
+    return container
+
+
+def optimize_container_cpu_requests(
+    namespace_name, workload, container, workload_type="deployment", target_ratio=1
+):
+    container_name = container.name
+    try:
+        old_cpu = convert_to_bytes(container.resources.requests["cpu"])
+    except:
+        _logger.info("Could not read old cpu requests aassuming it is 0")
+        old_cpu = 0
+
+    new_cpu = calculate_cpu_requests(
+        namespace_name,
+        workload,
+        workload_type,
+        container_name,
+        target_ratio,
+    )
+
+    diff_cpu = round(((new_cpu / old_cpu) - 1) * 100)
+
+    if abs(diff_cpu) < CHANGE_MIN * 100:
+        _logger.info("CPU requests change is too small: {}%".format(diff_cpu))
+        new_cpu = old_cpu
+    else:
+        _logger.info(
+            "CPU requests change: {} -> {} ({}%)".format(
+                str(round(old_cpu * 1000)) + "Mi",
+                str(round(new_cpu * 1000)) + "Mi",
+                diff_cpu,
+            )
+        )
+
+    return new_cpu
+
+
+def optimize_container_memory_requests(
+    namespace_name, workload, container, workload_type="deployment", target_ratio=1
+):
+    container_name = container.name
+
+    try:
+        old_memory = convert_to_bytes(container.resources.requests["memory"])
+    except:
+        _logger.info("Could not read old meory requests aassuming it is 0")
+        old_memory = 0
+
+    new_memory = calculate_memory_requests(
+        namespace_name,
+        workload,
+        workload_type,
+        container_name,
+        target_ratio,
+    )
+    diff_memory = round(((new_memory / old_memory) - 1) * 100)
+
+    if abs(diff_memory) < CHANGE_MIN * 100:
+        _logger.info("Memory request change is too small: {}%".format(diff_memory))
+        new_memory = old_memory
+    else:
+        _logger.info(
+            "Memory requests change: {} -> {} ({}%)".format(
+                str(round(old_memory / 1024 / 1024)) + "Mi",
+                str(round(new_memory / 1024 / 1024)) + "Mi",
+                diff_memory,
+            )
+        )
+    return new_memory
+
+
+def optimize_container_memory_limits(
+    namespace_name,
+    workload,
+    container,
+    workload_type="deployment",
+    new_memory=MEMORY_MIN,
+):
+    container_name = container.name
+
+    try:
+        old_memory_limit = convert_to_bytes(container.resources.limits["memory"])
+    except:
+        _logger.info("Could not read old meory limits aassuming it is 0")
+        old_memory_limit = 0
+
+    new_memory_limit = calculate_memory_limits(
+        namespace_name,
+        workload,
+        workload_type,
+        container_name,
+        new_memory,
+    )
+    diff_memory_limit = round(((new_memory_limit / old_memory_limit) - 1) * 100)
+
+    if abs(diff_memory_limit) < CHANGE_MIN * 100:
+        _logger.info("Memory limit change is too small: {}%".format(diff_memory_limit))
+        new_memory_limit = old_memory_limit
+    else:
+        _logger.info(
+            "Memory limits change: {} -> {} ({}%)".format(
+                str(round(old_memory_limit / 1024 / 1024)) + "Mi",
+                str(round(new_memory_limit / 1024 / 1024)) + "Mi",
+                diff_memory_limit,
+            )
+        )
+
+    return new_memory_limit
+
 
 # ---- CLI ----
 # The functions defined in this section are wrappers around the main Python
@@ -515,232 +775,37 @@ def main(args):
     setup_logging(args.loglevel)
     _logger.debug("Starting k8soptimizer...")
 
-    old_cpu_sum = 0
-    old_memory_sum = 0
-    new_cpu_sum = 0
-    new_memory_sum = 0
+    # old_cpu_sum = 0
+    # old_memory_sum = 0
+    # new_cpu_sum = 0
+    # new_memory_sum = 0
 
     _logger.debug("Listing k8s namespaces")
     for namespace in get_namespaces(NAMESPACE_FILTER):
-        namespace_name = namespace.metadata.name
-
-        _logger.info("Processing namespace: %s" % namespace_name)
-
+        _logger.debug("Processing namespace: %s" % namespace.metadata.name)
         _logger.debug("Listing k8s deployments")
-        for deployment in get_deployments(namespace_name, DEPLOYMENT_FILTER):
-            deployment_name = deployment.metadata.name
+        for deployment in get_deployments(namespace.metadata.name, DEPLOYMENT_FILTER):
+            optimze_deplayment(deployment)
 
-            _logger.info("Processing deployment: %s" % deployment_name)
+    # if old_cpu_sum > 0:
+    #     diff_cpu_sum = round(((new_cpu_sum / old_cpu_sum) - 1) * 100)
+    #     diff_memory_sum = round(((new_memory_sum / old_memory_sum) - 1) * 100)
 
-            _logger.debug("Checking deployment status")
-            latest_change = None
-            oldest_change = None
-            for condition in deployment.status.conditions:
-                if condition.last_update_time == None:
-                    continue
+    #     _logger.info(
+    #         "Summary CPU requests change: {} -> {} ({}%)".format(
+    #             str(round(old_cpu_sum * 1000)) + "Mi",
+    #             str(round(new_cpu_sum * 1000)) + "Mi",
+    #             diff_cpu_sum,
+    #         )
+    #     )
 
-                if latest_change == None:
-                    latest_change = datetime.datetime.fromtimestamp(
-                        condition.last_update_time.timestamp()
-                    )
-
-                if latest_change < datetime.datetime.fromtimestamp(
-                    condition.last_update_time.timestamp()
-                ):
-                    latest_change = datetime.datetime.fromtimestamp(
-                        condition.last_update_time.timestamp()
-                    )
-
-                if oldest_change == None:
-                    oldest_change = datetime.datetime.fromtimestamp(
-                        condition.last_update_time.timestamp()
-                    )
-
-                if oldest_change > datetime.datetime.fromtimestamp(
-                    condition.last_update_time.timestamp()
-                ):
-                    oldest_change = datetime.datetime.fromtimestamp(
-                        condition.last_update_time.timestamp()
-                    )
-
-            _logger.debug("Oldest change: {}".format(oldest_change))
-            _logger.debug("Newest change: {}".format(latest_change))
-
-            if oldest_change > (
-                datetime.datetime.now() - datetime.timedelta(seconds=AGE_FILTER)
-            ):
-                _logger.info(
-                    "Skipping deployment because of oldest change is too recent: {}".format(
-                        oldest_change
-                    )
-                )
-                continue
-
-            target_ratio = calculate_hpa_target_ratio(
-                namespace_name, deployment_name
-            )
-
-            target_ratio_cpu = target_ratio['cpu']
-            target_ratio_memory = target_ratio['memory']
-
-            _logger.info("Target ratio cpu: %s" % target_ratio_cpu)
-            _logger.info("Target ratio memory: %s" % target_ratio_memory)
-            i = -1
-
-            for container in deployment.spec.template.spec.containers:
-                container_name = container.name
-                i += 1
-
-                x = re.search(CONTAINER_FILTER, container_name)
-                if x == None:
-                    _logger.info(
-                        "Skipping container due to CONTAINER_FILTER: %s"
-                        % container_name
-                    )
-                    continue
-
-                _logger.info("Processing container: %s" % container_name)
-
-                nodejs = is_nodejs_container(
-                    namespace_name, deployment_name, container_name, "deployment"
-                )
-                if nodejs == True:
-                    _logger.info("Found nodejs in container: %s" % container_name)
-
-                if hasattr(container, "resources") is False:
-                    _logger.info(
-                        "Skipping container due to missing resources: %s"
-                        % container_name
-                    )
-                    continue
-                if hasattr(container.resources, "requests") is False:
-                    _logger.info(
-                        "Skipping container due to missing requests: %s"
-                        % container_name
-                    )
-                    continue
-                if container.resources.requests is None:
-                    _logger.info(
-                        "Skipping container due to missing requests: %s"
-                        % container_name
-                    )
-                    continue
-                if "memory" not in container.resources.requests:
-                    _logger.info(
-                        "Skipping container due to missing memory requests: %s"
-                        % container_name
-                    )
-                    continue
-                if "cpu" not in container.resources.requests:
-                    _logger.info(
-                        "Skipping container due to missing cpu requests: %s"
-                        % container_name
-                    )
-                    continue
-
-                old_memory = convert_to_bytes(container.resources.requests["memory"])
-                new_memory = calculate_memory_requests(namespace_name, deployment_name, "deployment", container_name, target_ratio_memory)
-                diff_memory = round(((new_memory / old_memory) - 1) * 100)
-
-                if abs(diff_memory) < CHANGE_MIN * 100:
-                    _logger.info(
-                        "Memory request change is too small: {}%".format(diff_memory)
-                    )
-                    new_memory = old_memory
-                else:
-                    _logger.info(
-                        "Memory requests change: {} -> {} ({}%)".format(
-                            str(round(old_memory / 1024 / 1024)) + "Mi",
-                            str(round(new_memory / 1024 / 1024)) + "Mi",
-                            diff_memory,
-                        )
-                    )
-
-                old_memory_limit = convert_to_bytes(
-                    container.resources.limits["memory"]
-                )
-                new_memory_limit =calculate_memory_requests(namespace_name, deployment_name, "deployment", container_name, new_memory)
-                diff_memory_limit = round(
-                    ((new_memory_limit / old_memory_limit) - 1) * 100
-                )
-
-                if abs(diff_memory_limit) < CHANGE_MIN * 100:
-                    _logger.info(
-                        "Memory limit change is too small: {}%".format(
-                            diff_memory_limit
-                        )
-                    )
-                    new_memory_limit = old_memory_limit
-                else:
-                    _logger.info(
-                        "Memory limits change: {} -> {} ({}%)".format(
-                            str(round(old_memory_limit / 1024 / 1024)) + "Mi",
-                            str(round(new_memory_limit / 1024 / 1024)) + "Mi",
-                            diff_memory_limit,
-                        )
-                    )
-
-                old_cpu = convert_to_number(container.resources.requests["cpu"])
-                new_cpu = calculate_cpu_requests(namespace_name, deployment_name, "deployment", container_name, target_ratio_cpu)
-
-                diff_cpu = round(((new_cpu / old_cpu) - 1) * 100)
-
-                if abs(diff_cpu) < CHANGE_MIN * 100:
-                    _logger.info(
-                        "CPU requests change is too small: {}%".format(diff_cpu)
-                    )
-                    new_cpu = old_cpu
-                else:
-                    _logger.info(
-                        "CPU requests change: {} -> {} ({}%)".format(
-                            str(round(old_cpu * 1000)) + "Mi",
-                            str(round(new_cpu * 1000)) + "Mi",
-                            diff_cpu,
-                        )
-                    )
-
-                old_cpu_sum += old_cpu * deployment.spec.replicas
-                new_cpu_sum += new_cpu * deployment.spec.replicas
-                old_memory_sum += old_memory * deployment.spec.replicas
-                new_memory_sum += new_memory * deployment.spec.replicas
-
-                deployment.spec.template.spec.containers[i].resources.requests[
-                    "cpu"
-                ] = (str(round(new_cpu * 1000)) + "Mi")
-                deployment.spec.template.spec.containers[i].resources.requests[
-                    "memory"
-                ] = (str(round(new_memory / 1024 / 1024)) + "Mi")
-                deployment.spec.template.spec.containers[i].resources.limits[
-                    "memory"
-                ] = (str(round(new_memory_limit / 1024 / 1024)) + "Mi")
-
-            # Apply the changes
-            _logger.info("Updating deployment: %s" % deployment_name)
-            # apis_api.patch_namespaced_deployment(
-            #    name=deployment_name, namespace=namespace_name, body=deployment, pretty=True
-            # )
-
-            print("")
-
-    if old_cpu_sum > 0:
-        diff_cpu_sum = round(((new_cpu_sum / old_cpu_sum) - 1) * 100)
-        diff_memory_sum = round(((new_memory_sum / old_memory_sum) - 1) * 100)
-
-        _logger.info(
-            "Summary CPU requests change: {} -> {} ({}%)".format(
-                str(round(old_cpu_sum * 1000)) + "Mi",
-                str(round(new_cpu_sum * 1000)) + "Mi",
-                diff_cpu_sum,
-            )
-        )
-
-        _logger.info(
-            "Summary Memory requests change: {} -> {} ({}%)".format(
-                str(round(old_memory_sum / 1024 / 1024)) + "Mi",
-                str(round(new_memory_sum / 1024 / 1024)) + "Mi",
-                diff_memory_sum,
-            )
-        )
+    #     _logger.info(
+    #         "Summary Memory requests change: {} -> {} ({}%)".format(
+    #             str(round(old_memory_sum / 1024 / 1024)) + "Mi",
+    #             str(round(new_memory_sum / 1024 / 1024)) + "Mi",
+    #             diff_memory_sum,
+    #         )
+    #     )
 
     _logger.info("Script ends here")
 
