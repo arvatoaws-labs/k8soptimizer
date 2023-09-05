@@ -17,6 +17,7 @@ def test_convert_to_bytes():
     assert helpers.convert_to_bytes("1K") == 1024
     assert helpers.convert_to_bytes("1M") == 1024**2
     assert helpers.convert_to_bytes("1G") == 1024**3
+    assert helpers.convert_to_bytes("1T") == 1024**4
     assert helpers.convert_to_bytes("1Ki") == 1024
     assert helpers.convert_to_bytes("1Mi") == 1024**2
     assert helpers.convert_to_bytes("1Gi") == 1024**3

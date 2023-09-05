@@ -606,8 +606,8 @@ def optimize_container_cpu_requests(
     try:
         old_cpu = convert_to_bytes(container.resources.requests["cpu"])
     except:
-        _logger.info("Could not read old cpu requests aassuming it is 0")
-        old_cpu = 0
+        _logger.info("Could not read old cpu requests aassuming it is 0.001")
+        old_cpu = 0.001
 
     new_cpu = calculate_cpu_requests(
         namespace_name,
@@ -642,8 +642,8 @@ def optimize_container_memory_requests(
     try:
         old_memory = convert_to_bytes(container.resources.requests["memory"])
     except:
-        _logger.info("Could not read old meory requests aassuming it is 0")
-        old_memory = 0
+        _logger.info("Could not read old meory requests aassuming it is 1")
+        old_memory = 1
 
     new_memory = calculate_memory_requests(
         namespace_name,
@@ -680,8 +680,8 @@ def optimize_container_memory_limits(
     try:
         old_memory_limit = convert_to_bytes(container.resources.limits["memory"])
     except:
-        _logger.info("Could not read old meory limits aassuming it is 0")
-        old_memory_limit = 0
+        _logger.info("Could not read old meory limits aassuming it is 1")
+        old_memory_limit = 1
 
     new_memory_limit = calculate_memory_limits(
         namespace_name,
@@ -807,7 +807,7 @@ def main(args):
     #         )
     #     )
 
-    _logger.info("Script ends here")
+    _logger.info("Starting finished k8s optimizer")
 
 
 def run():

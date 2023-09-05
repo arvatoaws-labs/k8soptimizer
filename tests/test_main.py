@@ -685,3 +685,73 @@ def test_calculate_memory_requests(mock_func1, mock_func2, test_case):
     )
 
     assert result == pytest.approx(expected_output, rel=1e-2)
+
+
+test_data_optimize_container = [
+    # Test case 0: Normal case with cpu and memory limits
+    {
+        "input_params": {
+            "old_requests": {"cpu": "6", "memory": "1G"},
+            "old_limits": {"cpu": "1", "memory": "10G"},
+            "new_requests": {"cpu": 3, "memory": 1024**3 * 2},
+            "new_limits": {"cpu": 3, "memory": 1024**3 * 4},
+        },
+        "expected_output": {
+            "requests": {"cpu": "3000Mi", "memory": "2048Mi"},
+            "limits": {"memory": "4096Mi"},
+        },
+    },
+    # Test case 1: Normal case with no limits
+    {
+        "input_params": {
+            "old_requests": {"cpu": "6", "memory": "1G"},
+            "old_limits": {},
+            "new_requests": {"cpu": 3, "memory": 1024**3 * 2},
+            "new_limits": {"cpu": 3, "memory": 1024**3 * 4},
+        },
+        "expected_output": {
+            "requests": {"cpu": "3000Mi", "memory": "2048Mi"},
+            "limits": {"memory": "4096Mi"},
+        },
+    },
+    # Test case 2: Normal case with no limits
+    {
+        "input_params": {
+            "old_requests": {"cpu": "6", "memory": "1G"},
+            "old_limits": {},
+            "new_requests": {"cpu": 1, "memory": 1024**3 * 2},
+            "new_limits": {"memory": 1024**3 * 4},
+        },
+        "expected_output": {
+            "requests": {"cpu": "1000Mi", "memory": "2048Mi"},
+            "limits": {"memory": "4096Mi"},
+        },
+    },
+]
+
+
+@pytest.mark.parametrize("test_case", test_data_optimize_container)
+@patch("k8soptimizer.main.calculate_memory_limits")
+@patch("k8soptimizer.main.calculate_memory_requests")
+@patch("k8soptimizer.main.calculate_cpu_requests")
+def test_optimize_container(mock_func1, mock_func2, mock_func3, test_case):
+    expected_output = test_case["expected_output"]
+
+    mock_func1.return_value = test_case["input_params"]["new_requests"]["cpu"]
+    mock_func2.return_value = test_case["input_params"]["new_requests"]["memory"]
+    mock_func3.return_value = test_case["input_params"]["new_limits"]["memory"]
+
+    container = V1Container(
+        name="nginx",
+        resources=V1ResourceRequirements(
+            requests=test_case["input_params"]["old_requests"],
+            limits=test_case["input_params"]["old_limits"],
+        ),
+    )
+
+    container = main.optimize_container(
+        "default", "deployment1", container, "deployment", 1, 1
+    )
+
+    assert container.resources.requests == expected_output["requests"]
+    assert container.resources.limits == expected_output["limits"]
