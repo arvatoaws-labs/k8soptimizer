@@ -356,14 +356,8 @@ def calculate_memory_requests(
 
 
 def calculate_memory_limits(
-    namespace_name,
-    workload,
-    workload_type,
-    container,
-    memory_requests,
-    lookback_minutes,
+    namespace_name, workload, workload_type, container_name, memory_requests
 ):
-    container_name = container.name
     new_memory_limit = max(
         MEMORY_LIMIT_MIN,
         min(MEMORY_LIMIT_MAX, memory_requests * MEMORY_LIMIT_RATIO),
@@ -566,6 +560,7 @@ def calculate_loookback_minutes_from_deployment(deployment):
 
     return lookback_minutes
 
+
 def optimize_deployment(deployment, dry_run=True):
     apis_api = client.AppsV1Api()
     namespace_name = deployment.metadata.namespace
@@ -577,7 +572,7 @@ def optimize_deployment(deployment, dry_run=True):
     target_ratio = calculate_hpa_target_ratio(
         namespace_name, deployment_name, lookback_minutes
     )
-
+    _logger.info(target_ratio)
     _logger.info("Target ratio cpu: %s" % target_ratio["cpu"])
     _logger.info("Target ratio memory: %s" % target_ratio["memory"])
     for i, container in enumerate(deployment.spec.template.spec.containers):
@@ -793,11 +788,7 @@ def optimize_container_memory_limits(
         old_memory_limit = 1
 
     new_memory_limit = calculate_memory_limits(
-        namespace_name,
-        workload,
-        workload_type,
-        container_name,
-        new_memory,
+        namespace_name, workload, workload_type, container_name, new_memory
     )
     diff_memory_limit = round(((new_memory_limit / old_memory_limit) - 1) * 100)
 
@@ -894,7 +885,9 @@ def main(args):
     for namespace in get_namespaces(NAMESPACE_FILTER).items:
         _logger.debug("Processing namespace: %s" % namespace.metadata.name)
         _logger.debug("Listing k8s deployments")
-        for deployment in get_deployments(namespace.metadata.name, DEPLOYMENT_FILTER).items:
+        for deployment in get_deployments(
+            namespace.metadata.name, DEPLOYMENT_FILTER
+        ).items:
             optimize_deployment(deployment)
 
     if stats["old_cpu_sum"] > 0:

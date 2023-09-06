@@ -1,4 +1,5 @@
 import pytest
+import datetime
 
 # Standard library imports...
 from unittest.mock import Mock, patch
@@ -47,15 +48,17 @@ def test_format_pairs():
 
 
 def test_calculate_minutes_ago():
-    assert (
-        helpers.calculate_minutes_ago_from_timestamp("2022-07-13T11:46:45Z")
-        > 60 * 24 * 365
-    )
-    assert (
-        helpers.calculate_minutes_ago_from_timestamp("2012-07-13T11:46:45Z")
-        > 60 * 24 * 365 * 10
-    )
-    assert helpers.calculate_minutes_ago_from_timestamp("2050-07-13T11:46:45Z") < 0
+    # Create datetime objects from timestamp strings
+    timestamp1 = datetime.fromisoformat("2022-07-13T11:46:45Z")
+    timestamp2 = datetime.fromisoformat("2012-07-13T11:46:45Z")
+    timestamp3 = datetime.fromisoformat("2050-07-13T11:46:45Z")
+    timestamp4 = datetime.fromisoformat("2023-07-28T13:55:23+00:00")
+
+    # Use the calculate_minutes_ago_from_timestamp function
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp1) > 60 * 24 * 365
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp2) > 60 * 24 * 365 * 10
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp3) < 0
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp4) > 0
 
 
 def test_create_timestamp_str():

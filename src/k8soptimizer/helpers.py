@@ -1,6 +1,6 @@
 import re
 import datetime
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dateutil import parser
 
 
@@ -60,14 +60,11 @@ def create_timestamp_str():
     # return n.isoformat()  # '2021-07-13T15:28:51.818095+00:00'
 
 
-def calculate_minutes_ago_from_timestamp(timestamp_str):
-    # Parse the creation timestamp to an offset-aware datetime object
-    creation_time = parser.parse(timestamp_str)
-
+def calculate_minutes_ago_from_timestamp(datetime_object):
     # Get the current time as an offset-aware datetime object in UTC
     current_time = datetime.now(timezone.utc)
 
     # Calculate the time difference in minutes
-    time_difference = (current_time - creation_time).total_seconds() / 60
+    time_difference = (current_time - datetime_object).total_seconds() / 60
 
     return int(time_difference)

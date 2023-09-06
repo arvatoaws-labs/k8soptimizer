@@ -3,6 +3,7 @@ import pytest
 import json
 import unittest
 import logging
+from datetime import datetime, timezone, timedelta
 
 # Standard library imports...
 from unittest.mock import Mock, patch
@@ -209,7 +210,9 @@ def test_get_namespaces(mock_requests_get):
     result = main.get_namespaces("namespace1")
 
     assert len(result.items) == 1  # Check if the result is as expected
-    assert result.items[0].metadata.name == "namespace1"  # Check if the result is as expected
+    assert (
+        result.items[0].metadata.name == "namespace1"
+    )  # Check if the result is as expected
 
     # Call the function under test
     result = main.get_namespaces("namespaceX")
@@ -828,7 +831,7 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
         metadata=V1ObjectMeta(
             name="deployment1",
             namespace="default",
-            creation_timestamp="2022-07-13T11:46:45Z",
+            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
             annotations={},
         ),
         spec=V1DeploymentSpec(
@@ -861,7 +864,7 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
         metadata=V1ObjectMeta(
             name="deployment1",
             namespace="default",
-            creation_timestamp="2022-07-13T11:46:45Z",
+            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
             annotations={},
         ),
         spec=V1DeploymentSpec(
@@ -899,7 +902,10 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
     assert (
         "k8soptimizer.arvato-aws.io/old-resources" in result.metadata.annotations.keys()
     )
-    assert "k8soptimizer.arvato-aws.io/last-update" in result.metadata.annotations.keys()
+    assert (
+        "k8soptimizer.arvato-aws.io/last-update" in result.metadata.annotations.keys()
+    )
+
 
 def test_parse_args_version(capsys):
     args = ["--version"]
@@ -910,15 +916,18 @@ def test_parse_args_version(capsys):
     assert "k8soptimizer" in captured.out
     assert excinfo.value.code == 0
 
+
 def test_parse_args_verbose():
     args = ["-v"]
     parsed_args = main.parse_args(args)
     assert parsed_args.loglevel == logging.INFO
 
+
 def test_parse_args_very_verbose():
     args = ["-vv"]
     parsed_args = main.parse_args(args)
     assert parsed_args.loglevel == logging.DEBUG
+
 
 @patch("k8soptimizer.main.optimize_deployment")
 @patch("k8soptimizer.main.verify_kubernetes_connection")
@@ -926,7 +935,6 @@ def test_parse_args_very_verbose():
 @patch("k8soptimizer.main.get_deployments")
 @patch("k8soptimizer.main.get_namespaces")
 def test_main(mock_func1, mock_func2, mock_func3, mock_func4, mock_func5):
-
     # Define a list of V1Namespace objects
     namespace1 = V1Namespace(metadata=V1ObjectMeta(name="namespace1"))
     namespace2 = V1Namespace(metadata=V1ObjectMeta(name="namespace2"))
@@ -995,7 +1003,6 @@ def test_main(mock_func1, mock_func2, mock_func3, mock_func4, mock_func5):
         ),
     )
     deployment_list = V1DeploymentList(items=[deployment1, deployment2, deployment3])
-
 
     mock_func1.return_value = namespace_list
     mock_func2.return_value = deployment_list
