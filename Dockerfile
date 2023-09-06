@@ -1,5 +1,6 @@
 # Use an official Python runtime as a parent image
-FROM python:3.9
+#FROM python:3.9
+FROM python:alpine3.18
 
 # Set the working directory to /app
 WORKDIR /app
@@ -14,7 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # EXPOSE 80
 
 # Define environment variable
+ENV PYTHONPATH /app/src
 ENV PROMETHEUS_URL "http://localhost:9090"
 
 # Run app.py when the container launches
-CMD ["python", "src/k8soptimizer/main.py"]
+CMD ["python", "-m", "src.k8soptimizer.main"]

@@ -58,5 +58,5 @@ def test_calculate_minutes_ago():
     assert helpers.calculate_minutes_ago_from_timestamp("2050-07-13T11:46:45Z") < 0
 
 def test_create_timestamp_str():
-    assert len(helpers.create_timestamp_str()) == 69
     assert helpers.calculate_minutes_ago_from_timestamp(helpers.create_timestamp_str()) == 0
+    assert len(helpers.create_timestamp_str()) == 32

@@ -52,8 +52,9 @@ def format_pairs(value_array):
     return ", ".join(formatted_pairs)
 
 def create_timestamp_str():
-    n = datetime.datetime.now(datetime.timezone.utc)
-    return n.isoformat()  # '2021-07-13T15:28:51.818095+00:00'
+    #n = datetime.now(datetime.timezone.utc)
+    return datetime.now(timezone.utc).isoformat()
+    #return n.isoformat()  # '2021-07-13T15:28:51.818095+00:00'
 
 def calculate_minutes_ago_from_timestamp(timestamp_str):
     # Parse the creation timestamp to an offset-aware datetime object
