@@ -68,6 +68,12 @@ MEMORY_LIMIT_RATIO = int(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
 
 CHANGE_MIN = os.getenv("CHANGE_MIN", 0.1)
 
+stats = {}
+stats['old_cpu_sum'] = 0
+stats['new_cpu_sum'] = 0
+stats['old_memory_sum'] = 0
+stats['new_memory_sum'] = 0
+
 # ---- Python API ----
 # The functions defined in this section can be imported by users in their
 # Python scripts/interactive interpreter, e.g. via
@@ -85,12 +91,27 @@ def query_prometheus(query):
         raise RuntimeError("Got invalid results from query: {}".format(query))
     return j
 
+def verify_prometehus_connection():
+    response = requests.get(PROMETHEUS_URL + "/api/v1/status/buildinfo")
+    j = json.loads(response.text)
+    _logger.debug(j)
+    if "status" not in j:
+        raise RuntimeError("Got invalid results request: {}".format(response.text))
+    if j["status"] == "success":
+        return True
+    raise RuntimeError("Connection to prometheus api failed")
+
+def verify_kubernetes_connection():
+    try:
+        client.ApisApi().get_api_versions_with_http_info()
+    except:
+        raise RuntimeError("Connection to kubernetes api failed")
+    return True
 
 def get_max_cpu_cores_per_runtime(runtime):
     if runtime == "nodejs":
         return 1
     return 100
-
 
 def get_max_pods_per_deployment_history(
     namespace_name,
@@ -109,7 +130,6 @@ def get_max_pods_per_deployment_history(
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return int(j["data"]["result"][0]["value"][1])
-
 
 def get_cpu_cores_usage_history(
     namespace,
@@ -133,7 +153,6 @@ def get_cpu_cores_usage_history(
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
 
-
 def get_memory_bytes_usage_history(
     namespace,
     workload,
@@ -156,14 +175,12 @@ def get_memory_bytes_usage_history(
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
 
-
 def discover_container_runtime(
     namespace, workload, container, workload_type="deployment"
 ):
     if is_nodejs_container(namespace, workload, container, workload_type):
         return "nodejs"
     return None
-
 
 def is_nodejs_container(namespace, workload, container, workload_type="deployment"):
     query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
@@ -182,7 +199,6 @@ def is_nodejs_container(namespace, workload, container, workload_type="deploymen
 
     return False
 
-
 def get_hpa_for_deployment(namespace_name, deployment_name):
     autoscaling_api = client.AutoscalingV2Api()
     for hpa in autoscaling_api.list_namespaced_horizontal_pod_autoscaler(
@@ -195,10 +211,8 @@ def get_hpa_for_deployment(namespace_name, deployment_name):
         return hpa
     return None
 
-
 def is_hpa_enabled_for_deployment(namespace_name, deployment_name):
     return get_hpa_for_deployment(namespace_name, deployment_name) is not None
-
 
 def calculate_hpa_target_ratio(
     namespace_name, deployment_name, lookback_minutes=DEFAULT_LOOKBACK_MINUTES
@@ -268,7 +282,6 @@ def calculate_hpa_target_ratio(
 
     return {"cpu": target_ratio_cpu, "memory": target_ratio_memory}
 
-
 def calculate_cpu_requests(
     namespace_name,
     workload,
@@ -329,7 +342,6 @@ def calculate_memory_requests(
 
     return new_memory
 
-
 def calculate_memory_limits(
     namespace_name,
     workload,
@@ -344,7 +356,6 @@ def calculate_memory_limits(
         min(MEMORY_LIMIT_MAX, memory_requests * MEMORY_LIMIT_RATIO),
     )
     return new_memory_limit
-
 
 def get_namespaces(namespace_filter=".*"):
     core_api = client.CoreV1Api()
@@ -365,7 +376,6 @@ def get_namespaces(namespace_filter=".*"):
         resp_rs.append(namespace)
 
     return resp_rs
-
 
 def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
     apis_api = client.AppsV1Api()
@@ -392,7 +402,6 @@ def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
 
     return resp_rs
 
-
 def get_max_pods_per_deployment_history(
     namespace_name,
     deployment_name,
@@ -410,7 +419,6 @@ def get_max_pods_per_deployment_history(
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return int(j["data"]["result"][0]["value"][1])
-
 
 def get_cpu_cores_usage_history(
     namespace,
@@ -434,7 +442,6 @@ def get_cpu_cores_usage_history(
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
 
-
 def get_memory_bytes_usage_history(
     namespace,
     workload,
@@ -456,7 +463,6 @@ def get_memory_bytes_usage_history(
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
     return float(j["data"]["result"][0]["value"][1])
-
 
 def get_oom_killed_history(
     namespace,
@@ -482,7 +488,6 @@ def get_oom_killed_history(
 
     return 0
 
-
 def is_nodejs_container(namespace, workload, container, workload_type="deployment"):
     query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
         namespace=namespace,
@@ -500,7 +505,6 @@ def is_nodejs_container(namespace, workload, container, workload_type="deploymen
 
     return False
 
-
 def get_resources_from_deployment(deployment):
     res = {}
     for container in deployment.spec.template.spec.containers:
@@ -515,19 +519,16 @@ def get_resources_from_deployment(deployment):
             res[container.name]["limits"] = {}
     return res
 
-
 def optimze_deplayment(deployment, dry_run=True):
     apis_api = client.AppsV1Api()
-    _logger.info("Optimizing deployment: %s" % deployment_name)
     namespace_name = deployment.metadata.namespace
     deployment_name = deployment.metadata.name
+    _logger.info("Optimizing deployment: %s" % deployment_name)
 
     old_resources = get_resources_from_deployment(deployment)
 
-    _logger.debug("Checking deployment status")
-
     lookback_minutes = DEFAULT_LOOKBACK_MINUTES
-    creation_minutes_ago = calculate_minutes_ago_from_timestamp(
+    creation_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
         deployment.metadata.creation_timestamp
     )
     if creation_minutes_ago < CREATE_AGE_FILTER:
@@ -541,7 +542,7 @@ def optimze_deplayment(deployment, dry_run=True):
         lookback_minutes = creation_minutes_ago
 
     if "k8soptimizer.arvato-aws.io/last-update" in deployment.metadata.annotations:
-        update_minutes_ago = calculate_minutes_ago_from_timestamp(
+        update_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
             deployment.metadata.creation_timestamp
         )
         if update_minutes_ago < UPDATE_AGE_FILTER:
@@ -575,6 +576,7 @@ def optimze_deplayment(deployment, dry_run=True):
             target_ratio_cpu,
             target_ratio_memory,
             lookback_minutes,
+            deployment.spec.replicas
         )
         deployment.spec.template.spec[i] = container_new
 
@@ -601,7 +603,6 @@ def optimze_deplayment(deployment, dry_run=True):
             name=deployment_name, namespace=namespace_name, body=deployment, pretty=True
         )
 
-
 def optimize_container(
     namespace_name,
     workload,
@@ -610,11 +611,13 @@ def optimize_container(
     target_ratio_cpu=1,
     target_ratio_memory=1,
     lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    current_replicas=1
 ):
     container_name = container.name
 
     _logger.info("Processing container: %s" % container_name)
 
+    old_cpu = get_cpu_requests_from_container(container)
     new_cpu = optimize_container_cpu_requests(
         namespace_name,
         workload,
@@ -623,6 +626,7 @@ def optimize_container(
         target_ratio_cpu,
         lookback_minutes,
     )
+    old_memory = get_memory_requests_from_container(container)
     new_memory = optimize_container_memory_requests(
         namespace_name,
         workload,
@@ -635,10 +639,10 @@ def optimize_container(
         namespace_name, workload, container, workload_type, target_ratio_memory
     )
 
-    # old_cpu_sum += old_cpu * deployment.spec.replicas
-    # new_cpu_sum += new_cpu * deployment.spec.replicas
-    # old_memory_sum += old_memory * deployment.spec.replicas
-    # new_memory_sum += new_memory * deployment.spec.replicas
+    stats['old_cpu_sum'] += old_cpu * current_replicas
+    stats['new_cpu_sum'] += new_cpu * current_replicas
+    stats['old_memory_sum'] += old_memory * current_replicas
+    stats['new_memory_sum'] += new_memory * current_replicas
 
     container.resources.requests["cpu"] = str(round(new_cpu * 1000)) + "Mi"
     if "cpu" in container.resources.limits:
@@ -650,6 +654,26 @@ def optimize_container(
 
     return container
 
+def get_cpu_requests_from_container(container):
+    try:
+        old_cpu = helpers.convert_to_bytes(container.resources.requests["cpu"])
+    except:
+        old_cpu = 0.001
+    return old_cpu
+
+def get_memory_requests_from_container(container):
+    try:
+        old_memory = helpers.convert_to_bytes(container.resources.requests["memory"])
+    except:
+        old_memory = 1
+    return old_memory
+
+def get_memory_limits_from_container(container):
+    try:
+        old_memory = helpers.convert_to_bytes(container.resources.limits["memory"])
+    except:
+        old_memory = 1
+    return old_memory
 
 def optimize_container_cpu_requests(
     namespace_name,
@@ -663,7 +687,7 @@ def optimize_container_cpu_requests(
     try:
         old_cpu = convert_to_bytes(container.resources.requests["cpu"])
     except:
-        _logger.info("Could not read old cpu requests aassuming it is 0.001")
+        _logger.info("Could not read old CPU requests aassuming it is 0.001")
         old_cpu = 0.001
 
     new_cpu = calculate_cpu_requests(
@@ -702,7 +726,7 @@ def optimize_container_memory_requests(
     container_name = container.name
 
     try:
-        old_memory = convert_to_bytes(container.resources.requests["memory"])
+        old_memory = helpers.convert_to_bytes(container.resources.requests["memory"])
     except:
         _logger.info("Could not read old meory requests aassuming it is 1")
         old_memory = 1
@@ -730,7 +754,6 @@ def optimize_container_memory_requests(
         )
     return new_memory
 
-
 def optimize_container_memory_limits(
     namespace_name,
     workload,
@@ -741,7 +764,7 @@ def optimize_container_memory_limits(
     container_name = container.name
 
     try:
-        old_memory_limit = convert_to_bytes(container.resources.limits["memory"])
+        old_memory_limit = helpers.convert_to_bytes(container.resources.limits["memory"])
     except:
         _logger.info("Could not read old meory limits aassuming it is 1")
         old_memory_limit = 1
@@ -768,7 +791,6 @@ def optimize_container_memory_limits(
         )
 
     return new_memory_limit
-
 
 # ---- CLI ----
 # The functions defined in this section are wrappers around the main Python
@@ -838,10 +860,8 @@ def main(args):
     setup_logging(args.loglevel)
     _logger.debug("Starting k8soptimizer...")
 
-    # old_cpu_sum = 0
-    # old_memory_sum = 0
-    # new_cpu_sum = 0
-    # new_memory_sum = 0
+    verify_kubernetes_connection()
+    verify_prometehus_connection()
 
     _logger.debug("Listing k8s namespaces")
     for namespace in get_namespaces(NAMESPACE_FILTER):
@@ -850,27 +870,27 @@ def main(args):
         for deployment in get_deployments(namespace.metadata.name, DEPLOYMENT_FILTER):
             optimze_deplayment(deployment)
 
-    # if old_cpu_sum > 0:
-    #     diff_cpu_sum = round(((new_cpu_sum / old_cpu_sum) - 1) * 100)
-    #     diff_memory_sum = round(((new_memory_sum / old_memory_sum) - 1) * 100)
+    if stats['old_cpu_sum'] > 0:
+        diff_cpu_sum = round(((stats['new_cpu_sum'] / stats['old_cpu_sum']) - 1) * 100)
+        diff_memory_sum = round(((stats['new_memory_sum'] / stats['old_memory_sum']) - 1) * 100)
 
-    #     _logger.info(
-    #         "Summary CPU requests change: {} -> {} ({}%)".format(
-    #             str(round(old_cpu_sum * 1000)) + "Mi",
-    #             str(round(new_cpu_sum * 1000)) + "Mi",
-    #             diff_cpu_sum,
-    #         )
-    #     )
+        _logger.info(
+            "Summary cpu requests change: {} -> {} ({}%)".format(
+                str(round(stats['old_cpu_sum'] * 1000)) + "Mi",
+                str(round(stats['new_cpu_sum'] * 1000)) + "Mi",
+                diff_cpu_sum,
+            )
+        )
 
-    #     _logger.info(
-    #         "Summary Memory requests change: {} -> {} ({}%)".format(
-    #             str(round(old_memory_sum / 1024 / 1024)) + "Mi",
-    #             str(round(new_memory_sum / 1024 / 1024)) + "Mi",
-    #             diff_memory_sum,
-    #         )
-    #     )
+        _logger.info(
+            "Summary memory requests change: {} -> {} ({}%)".format(
+                str(round(stats['old_memory_sum'] / 1024 / 1024)) + "Mi",
+                str(round(stats['new_memory_sum'] / 1024 / 1024)) + "Mi",
+                diff_memory_sum,
+            )
+        )
 
-    _logger.info("Starting finished k8s optimizer")
+    _logger.info("Finished k8soptimizer")
 
 
 def run():

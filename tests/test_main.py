@@ -813,3 +813,77 @@ def test_resources_from_deployment():
         assert result[key] == value
 
     # assert result == expected_result
+
+
+@patch("k8soptimizer.main.optimize_container")
+@patch("k8soptimizer.main.calculate_hpa_target_ratio")
+def test_optimze_deplayment(mock_func1, mock_func2):
+    # Define a list of V1Namespace objects
+    deployment1_input = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment1",
+            creation_timestamp="2022-07-13T11:46:45Z",
+        ),
+        spec=V1DeploymentSpec(
+            replicas=1,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "1"}, limits={"cpu": "1"}
+                            ),
+                        ),
+                        V1Container(
+                            name="php",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "2", "memory": "4Gi"}, limits={}
+                            ),
+                        ),
+                        V1Container(name="php-monitor"),
+                    ]
+                )
+            ),
+        ),
+    )
+
+    # Define a list of V1Namespace objects
+    deployment1_output = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment1",
+            creation_timestamp="2022-07-13T11:46:45Z",
+        ),
+        spec=V1DeploymentSpec(
+            replicas=1,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "1", "memory": "2Gi"}, limits={"memory": "4Gi"}
+                            ),
+                        ),
+                        V1Container(
+                            name="php",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "4", "memory": "8Gi"}, limits={}
+                            ),
+                        ),
+                        V1Container(name="php-monitor"),
+                    ]
+                )
+            ),
+        ),
+    )
+
+    mock_func1.return_value = deployment1_output
+    mock_func2.return_value = {"ratio_cpu": 2, "ratio_memory": 2}
+
+    result = main.optimze_deplayment(deployment1_input)
+
+    assert "k8soptimizer.k8soptimizer/old-resources" in result.metadata.annotations
+    assert "k8soptimizer.k8soptimizer/last-update" in result.metadata.annotations
