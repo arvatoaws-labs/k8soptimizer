@@ -34,10 +34,9 @@ k8soptimizer
 ============
 
 
-    Add a short description here!
+    This tool optimizes the kubernetes workloads resource requsts and limits.
 
-
-A longer description of your project goes here...
+The idea is to use prometheus data as a data source. This tool is desigend to work with hpa deployments.
 
 
 .. _pyscaffold-notes:

@@ -27,18 +27,18 @@ import sys
 import requests
 import json
 import re
-import datetime
 import os
 
 from kubernetes import client, config
 
 from k8soptimizer import __version__
-
-from . import helpers
+from k8soptimizer import helpers
 
 __author__ = "Philipp Hellmich"
-__copyright__ = "Philipp Hellmich"
+__copyright__ = "Arvato Systems GmbH"
 __license__ = "MIT"
+
+__domain__ = "arvato-aws.io"
 
 _logger = logging.getLogger(__name__)
 
@@ -50,10 +50,15 @@ PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
 NAMESPACE_FILTER = os.getenv("NAMESPACE_FILTER", ".*")
 DEPLOYMENT_FILTER = os.getenv("DEPLOYMENT_FILTER", ".*")
 CONTAINER_FILTER = os.getenv("CONTAINER_FILTER", ".*")
-AGE_FILTER = int(os.getenv("AGE_FILTER", 3600))
+
+CREATE_AGE_FILTER = int(os.getenv("CREATE_AGE_FILTER", 3600))
+UPDATE_AGE_FILTER = int(os.getenv("UPDATE_AGE_FILTER", 3600))
+
+DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 3600 * 24 * 7))
+DEFAULT_QUANTILE_OVER_TIME = int(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95))
 
 CPU_MIN = float(os.getenv("CPU_MIN", 0.001))
-CPU_MAX = float(os.getenv("CPU_MAX", 4))
+CPU_MAX = float(os.getenv("CPU_MAX", 16))
 CPU_MAX_NODEJS = 1
 MEMORY_MIN = int(os.getenv("MEMORY_MIN", 1024**2 * 16))
 MEMORY_MAX = int(os.getenv("MEMORY_MAX", 1024**3 * 16))
@@ -68,7 +73,6 @@ CHANGE_MIN = os.getenv("CHANGE_MIN", 0.1)
 # Python scripts/interactive interpreter, e.g. via
 # `from k8soptimizer.skeleton import fib`,
 # when using this Python module as a library.
-
 
 def query_prometheus(query):
     _logger.debug(query)
@@ -91,8 +95,8 @@ def get_max_cpu_cores_per_runtime(runtime):
 def get_max_pods_per_deployment_history(
     namespace_name,
     deployment_name,
-    lookback_minutes=3600 * 24 * 7,
-    quantile_over_time=0.95,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time=DEFAULT_QUANTILE_OVER_TIME,
 ):
     query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{lookback_minutes}m]))'.format(
         quantile_over_time=quantile_over_time,
@@ -112,8 +116,8 @@ def get_cpu_cores_usage_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600 * 24 * 7,
-    quantile_over_time=0.95,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time=DEFAULT_QUANTILE_OVER_TIME,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
@@ -135,8 +139,8 @@ def get_memory_bytes_usage_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600 * 24 * 7,
-    quantile_over_time=0.95,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time=DEFAULT_QUANTILE_OVER_TIME,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
@@ -197,7 +201,7 @@ def is_hpa_enabled_for_deployment(namespace_name, deployment_name):
 
 
 def calculate_hpa_target_ratio(
-    namespace_name, deployment_name, lookback_minutes=3600 * 24 * 7
+    namespace_name, deployment_name, lookback_minutes=DEFAULT_LOOKBACK_MINUTES
 ):
     hpa_ratio_addon = 0
     hpa_min_replica = 0
@@ -266,7 +270,12 @@ def calculate_hpa_target_ratio(
 
 
 def calculate_cpu_requests(
-    namespace_name, workload, workload_type, container_name, target_ratio_cpu
+    namespace_name,
+    workload,
+    workload_type,
+    container_name,
+    target_ratio_cpu,
+    lookback_minutes,
 ):
     new_cpu = round(
         max(
@@ -278,6 +287,7 @@ def calculate_cpu_requests(
                     workload,
                     container_name,
                     workload_type,
+                    lookback_minutes,
                 )
                 * target_ratio_cpu,
             ),
@@ -294,7 +304,12 @@ def calculate_cpu_requests(
 
 
 def calculate_memory_requests(
-    namespace_name, workload, workload_type, container_name, target_ratio_memory
+    namespace_name,
+    workload,
+    workload_type,
+    container_name,
+    target_ratio_memory,
+    lookback_minutes,
 ):
     new_memory = round(
         max(
@@ -316,7 +331,12 @@ def calculate_memory_requests(
 
 
 def calculate_memory_limits(
-    namespace_name, workload, workload_type, container, memory_requests
+    namespace_name,
+    workload,
+    workload_type,
+    container,
+    memory_requests,
+    lookback_minutes,
 ):
     container_name = container.name
     new_memory_limit = max(
@@ -376,8 +396,8 @@ def get_deployments(namespace_name, deployment_filter=".*", only_running=True):
 def get_max_pods_per_deployment_history(
     namespace_name,
     deployment_name,
-    lookback_minutes=3600 * 24 * 7,
-    quantile_over_time="0.95",
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time=DEFAULT_QUANTILE_OVER_TIME,
 ):
     query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{lookback_minutes}m]))'.format(
         quantile_over_time=quantile_over_time,
@@ -397,8 +417,8 @@ def get_cpu_cores_usage_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600 * 24 * 7,
-    quantile_over_time="0.95",
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time=DEFAULT_QUANTILE_OVER_TIME,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
@@ -420,8 +440,8 @@ def get_memory_bytes_usage_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600 * 24 * 7,
-    quantile_over_time=0.95,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time=DEFAULT_QUANTILE_OVER_TIME,
 ):
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
@@ -443,7 +463,7 @@ def get_oom_killed_history(
     workload,
     container,
     workload_type="deployment",
-    lookback_minutes=3600 * 24 * 7,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
 ):
     query = 'sum_over_time(kube_workload_container_resource_usage_memory_oom_killed{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         namespace=namespace,
@@ -481,57 +501,62 @@ def is_nodejs_container(namespace, workload, container, workload_type="deploymen
     return False
 
 
+def get_resources_from_deployment(deployment):
+    res = {}
+    for container in deployment.spec.template.spec.containers:
+        res[container.name] = {}
+        try:
+            res[container.name]["requests"] = container.resources.requests
+        except:
+            res[container.name]["requests"] = {}
+        try:
+            res[container.name]["limits"] = container.resources.limits
+        except:
+            res[container.name]["limits"] = {}
+    return res
+
+
 def optimze_deplayment(deployment, dry_run=True):
     apis_api = client.AppsV1Api()
     _logger.info("Optimizing deployment: %s" % deployment_name)
     namespace_name = deployment.metadata.namespace
     deployment_name = deployment.metadata.name
 
+    old_resources = get_resources_from_deployment(deployment)
+
     _logger.debug("Checking deployment status")
-    latest_change = None
-    oldest_change = None
-    for condition in deployment.status.conditions:
-        if condition.last_update_time == None:
-            continue
 
-        if latest_change == None:
-            latest_change = datetime.datetime.fromtimestamp(
-                condition.last_update_time.timestamp()
-            )
-
-        if latest_change < datetime.datetime.fromtimestamp(
-            condition.last_update_time.timestamp()
-        ):
-            latest_change = datetime.datetime.fromtimestamp(
-                condition.last_update_time.timestamp()
-            )
-
-        if oldest_change == None:
-            oldest_change = datetime.datetime.fromtimestamp(
-                condition.last_update_time.timestamp()
-            )
-
-        if oldest_change > datetime.datetime.fromtimestamp(
-            condition.last_update_time.timestamp()
-        ):
-            oldest_change = datetime.datetime.fromtimestamp(
-                condition.last_update_time.timestamp()
-            )
-
-    _logger.debug("Oldest change: {}".format(oldest_change))
-    _logger.debug("Newest change: {}".format(latest_change))
-
-    if oldest_change > (
-        datetime.datetime.now() - datetime.timedelta(seconds=AGE_FILTER)
-    ):
+    lookback_minutes = DEFAULT_LOOKBACK_MINUTES
+    creation_minutes_ago = calculate_minutes_ago_from_timestamp(
+        deployment.metadata.creation_timestamp
+    )
+    if creation_minutes_ago < CREATE_AGE_FILTER:
         _logger.info(
-            "Skipping deployment because of oldest change is too recent: {}".format(
-                oldest_change
+            "Skipping deployment because creation was {} minutes ago (min value {})".format(
+                creation_minutes_ago, CREATE_AGE_FILTER
             )
         )
         return
+    else:
+        lookback_minutes = creation_minutes_ago
 
-    target_ratio = calculate_hpa_target_ratio(namespace_name, deployment_name)
+    if "k8soptimizer.arvato-aws.io/last-update" in deployment.metadata.annotations:
+        update_minutes_ago = calculate_minutes_ago_from_timestamp(
+            deployment.metadata.creation_timestamp
+        )
+        if update_minutes_ago < UPDATE_AGE_FILTER:
+            _logger.info(
+                "Skipping deployment because last update was {} minutes ago (min value {})".format(
+                    update_minutes_ago, UPDATE_AGE_FILTER
+                )
+            )
+            return
+    else:
+        lookback_minutes = min(lookback_minutes, update_minutes_ago)
+
+    target_ratio = calculate_hpa_target_ratio(
+        namespace_name, deployment_name, lookback_minutes
+    )
 
     target_ratio_cpu = target_ratio["cpu"]
     target_ratio_memory = target_ratio["memory"]
@@ -549,13 +574,29 @@ def optimze_deplayment(deployment, dry_run=True):
             "deployment",
             target_ratio_cpu,
             target_ratio_memory,
+            lookback_minutes,
         )
         deployment.spec.template.spec[i] = container_new
 
+    deployment.metadata.annotations[
+        "k8soptimizer.{}/old-resources".format(__domain__)
+    ] = json.dumps(old_resources)
+    deployment.metadata.annotations[
+        "k8soptimizer.{}/last-update".format(__domain__)
+    ] = helpers.create_timestamp_str()
+
     # Apply the changes
     if dry_run == True:
+        _logger.info("Updating (dry-run) deployment: %s" % deployment_name)
+        apis_api.patch_namespaced_deployment(
+            name=deployment_name,
+            namespace=namespace_name,
+            body=deployment,
+            pretty=True,
+            dry_run="All",
+        )
+    else:
         _logger.info("Updating deployment: %s" % deployment_name)
-        # FIXME add last update annotation
         apis_api.patch_namespaced_deployment(
             name=deployment_name, namespace=namespace_name, body=deployment, pretty=True
         )
@@ -568,16 +609,27 @@ def optimize_container(
     workload_type="deployment",
     target_ratio_cpu=1,
     target_ratio_memory=1,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
 ):
     container_name = container.name
 
     _logger.info("Processing container: %s" % container_name)
 
     new_cpu = optimize_container_cpu_requests(
-        namespace_name, workload, container, workload_type, target_ratio_cpu
+        namespace_name,
+        workload,
+        container,
+        workload_type,
+        target_ratio_cpu,
+        lookback_minutes,
     )
     new_memory = optimize_container_memory_requests(
-        namespace_name, workload, container, workload_type, target_ratio_memory
+        namespace_name,
+        workload,
+        container,
+        workload_type,
+        target_ratio_memory,
+        lookback_minutes,
     )
     new_memory_limit = optimize_container_memory_limits(
         namespace_name, workload, container, workload_type, target_ratio_memory
@@ -600,7 +652,12 @@ def optimize_container(
 
 
 def optimize_container_cpu_requests(
-    namespace_name, workload, container, workload_type="deployment", target_ratio=1
+    namespace_name,
+    workload,
+    container,
+    workload_type="deployment",
+    target_ratio=1,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
 ):
     container_name = container.name
     try:
@@ -615,6 +672,7 @@ def optimize_container_cpu_requests(
         workload_type,
         container_name,
         target_ratio,
+        lookback_minutes,
     )
 
     diff_cpu = round(((new_cpu / old_cpu) - 1) * 100)
@@ -633,9 +691,13 @@ def optimize_container_cpu_requests(
 
     return new_cpu
 
-
 def optimize_container_memory_requests(
-    namespace_name, workload, container, workload_type="deployment", target_ratio=1
+    namespace_name,
+    workload,
+    container,
+    workload_type="deployment",
+    target_ratio=1,
+    lookback_minutes=DEFAULT_LOOKBACK_MINUTES,
 ):
     container_name = container.name
 
@@ -651,6 +713,7 @@ def optimize_container_memory_requests(
         workload_type,
         container_name,
         target_ratio,
+        lookback_minutes,
     )
     diff_memory = round(((new_memory / old_memory) - 1) * 100)
 

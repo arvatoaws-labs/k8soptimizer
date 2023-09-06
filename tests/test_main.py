@@ -597,6 +597,7 @@ def test_calculate_cpu_requests(mock_func1, mock_func2, test_case):
         "development",
         "nginx",
         input_params["cpu_ratio"],
+        main.DEFAULT_LOOKBACK_MINUTES,
     )
 
     assert result == pytest.approx(expected_output, rel=1e-2)
@@ -682,6 +683,7 @@ def test_calculate_memory_requests(mock_func1, mock_func2, test_case):
         "development",
         "nginx",
         input_params["memory_ratio"],
+        main.DEFAULT_LOOKBACK_MINUTES,
     )
 
     assert result == pytest.approx(expected_output, rel=1e-2)
@@ -750,8 +752,64 @@ def test_optimize_container(mock_func1, mock_func2, mock_func3, test_case):
     )
 
     container = main.optimize_container(
-        "default", "deployment1", container, "deployment", 1, 1
+        "default",
+        "deployment1",
+        container,
+        "deployment",
+        1,
+        1,
+        main.DEFAULT_LOOKBACK_MINUTES,
     )
 
     assert container.resources.requests == expected_output["requests"]
     assert container.resources.limits == expected_output["limits"]
+
+
+def test_resources_from_deployment():
+    # Define a list of V1Namespace objects
+    deployment1 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment1",
+        ),
+        spec=V1DeploymentSpec(
+            replicas=1,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "1"}, limits={"cpu": "1"}
+                            ),
+                        ),
+                        V1Container(
+                            name="php",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "8", "memory": "6Gi"}, limits={}
+                            ),
+                        ),
+                        V1Container(name="php-monitor"),
+                    ]
+                )
+            ),
+        ),
+    )
+
+    expected_result = {
+        "nginx": {
+            "requests": deployment1.spec.template.spec.containers[0].resources.requests,
+            "limits": deployment1.spec.template.spec.containers[0].resources.limits,
+        },
+        "php": {
+            "requests": deployment1.spec.template.spec.containers[1].resources.requests,
+            "limits": {},
+        },
+        "php-monitor": {"requests": {}, "limits": {}},
+    }
+    result = main.get_resources_from_deployment(deployment1)
+
+    for key, value in expected_result.items():
+        assert result[key] == value
+
+    # assert result == expected_result

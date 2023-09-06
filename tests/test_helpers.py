@@ -41,6 +41,22 @@ def test_convert_to_number():
     assert str(exc_info.value) == "Invalid unit"
 
 
-def format_pairs():
+def test_format_pairs():
     assert helpers.format_pairs({"name": "otto"}) == "name=otto"
     assert helpers.format_pairs({"name": "otto", "age": 6}) == "name=otto, age=6"
+
+
+def test_calculate_minutes_ago():
+    assert (
+        helpers.calculate_minutes_ago_from_timestamp("2022-07-13T11:46:45Z")
+        > 60 * 24 * 365
+    )
+    assert (
+        helpers.calculate_minutes_ago_from_timestamp("2012-07-13T11:46:45Z")
+        > 60 * 24 * 365 * 10
+    )
+    assert helpers.calculate_minutes_ago_from_timestamp("2050-07-13T11:46:45Z") < 0
+
+def test_create_timestamp_str():
+    assert len(helpers.create_timestamp_str()) == 69
+    assert helpers.calculate_minutes_ago_from_timestamp(helpers.create_timestamp_str()) == 0
