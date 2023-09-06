@@ -1,6 +1,8 @@
+import argparse
 import pytest
 import json
 import unittest
+import logging
 
 # Standard library imports...
 from unittest.mock import Mock, patch
@@ -196,7 +198,7 @@ def test_get_namespaces(mock_requests_get):
     result = main.get_namespaces(".*")
 
     # Verify that the function behaves as expected
-    assert len(result) == 2  # Check if the result is as expected
+    assert len(result.items) == 2  # Check if the result is as expected
 
     # Define a list of V1Namespace objects
     namespace_list = V1NamespaceList(items=[namespace1])
@@ -206,13 +208,13 @@ def test_get_namespaces(mock_requests_get):
     # Call the function under test
     result = main.get_namespaces("namespace1")
 
-    assert len(result) == 1  # Check if the result is as expected
-    assert result[0].metadata.name == "namespace1"  # Check if the result is as expected
+    assert len(result.items) == 1  # Check if the result is as expected
+    assert result.items[0].metadata.name == "namespace1"  # Check if the result is as expected
 
     # Call the function under test
     result = main.get_namespaces("namespaceX")
 
-    assert len(result) == 0  # Check if the result is as expected
+    assert len(result.items) == 0  # Check if the result is as expected
 
 
 @patch(
@@ -223,6 +225,7 @@ def test_get_deployments(mock_requests_get):
     deployment1 = V1Deployment(
         metadata=V1ObjectMeta(
             name="deployment1",
+            namespace="default",
         ),
         spec=V1DeploymentSpec(
             replicas=1,
@@ -244,6 +247,7 @@ def test_get_deployments(mock_requests_get):
     deployment2 = V1Deployment(
         metadata=V1ObjectMeta(
             name="deployment2",
+            namespace="default",
         ),
         spec=V1DeploymentSpec(
             replicas=2,
@@ -287,7 +291,7 @@ def test_get_deployments(mock_requests_get):
     result = main.get_deployments("default", ".*")
 
     # Verify that the function behaves as expected
-    assert len(result) == 2  # Check if the result is as expected
+    assert len(result.items) == 2  # Check if the result is as expected
 
     # Define a list of V1Namespace objects
     deployment_list = V1DeploymentList(items=[deployment1, deployment2])
@@ -297,15 +301,15 @@ def test_get_deployments(mock_requests_get):
     # Call the function under test
     result = main.get_deployments("default", "^deployment1$")
 
-    assert len(result) == 1  # Check if the result is as expected
+    assert len(result.items) == 1  # Check if the result is as expected
     assert (
-        result[0].metadata.name == "deployment1"
+        result.items[0].metadata.name == "deployment1"
     )  # Check if the result is as expected
 
     # Call the function under test
     result = main.get_deployments("default", "deploymentX")
 
-    assert len(result) == 0  # Check if the result is as expected
+    assert len(result.items) == 0  # Check if the result is as expected
 
 
 @patch(
@@ -815,14 +819,17 @@ def test_resources_from_deployment():
     # assert result == expected_result
 
 
-@patch("k8soptimizer.main.optimize_container")
+@patch("k8soptimizer.main.client.AppsV1Api.patch_namespaced_deployment")
 @patch("k8soptimizer.main.calculate_hpa_target_ratio")
-def test_optimze_deplayment(mock_func1, mock_func2):
+@patch("k8soptimizer.main.optimize_container")
+def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
     # Define a list of V1Namespace objects
     deployment1_input = V1Deployment(
         metadata=V1ObjectMeta(
             name="deployment1",
+            namespace="default",
             creation_timestamp="2022-07-13T11:46:45Z",
+            annotations={},
         ),
         spec=V1DeploymentSpec(
             replicas=1,
@@ -853,7 +860,9 @@ def test_optimze_deplayment(mock_func1, mock_func2):
     deployment1_output = V1Deployment(
         metadata=V1ObjectMeta(
             name="deployment1",
+            namespace="default",
             creation_timestamp="2022-07-13T11:46:45Z",
+            annotations={},
         ),
         spec=V1DeploymentSpec(
             replicas=1,
@@ -864,7 +873,8 @@ def test_optimze_deplayment(mock_func1, mock_func2):
                         V1Container(
                             name="nginx",
                             resources=V1ResourceRequirements(
-                                requests={"cpu": "1", "memory": "2Gi"}, limits={"memory": "4Gi"}
+                                requests={"cpu": "1", "memory": "2Gi"},
+                                limits={"memory": "4Gi"},
                             ),
                         ),
                         V1Container(
@@ -881,9 +891,121 @@ def test_optimze_deplayment(mock_func1, mock_func2):
     )
 
     mock_func1.return_value = deployment1_output
-    mock_func2.return_value = {"ratio_cpu": 2, "ratio_memory": 2}
+    mock_func2.return_value = {"cpu": 2, "memory": 2}
+    mock_func3.return_value = True
 
-    result = main.optimze_deplayment(deployment1_input)
+    result = main.optimize_deployment(deployment1_input)
 
-    assert "k8soptimizer.k8soptimizer/old-resources" in result.metadata.annotations
-    assert "k8soptimizer.k8soptimizer/last-update" in result.metadata.annotations
+    assert (
+        "k8soptimizer.arvato-aws.io/old-resources" in result.metadata.annotations.keys()
+    )
+    assert "k8soptimizer.arvato-aws.io/last-update" in result.metadata.annotations.keys()
+
+def test_parse_args_version(capsys):
+    args = ["--version"]
+    with pytest.raises(SystemExit) as excinfo:
+        main.parse_args(args)
+
+    captured = capsys.readouterr()
+    assert "k8soptimizer" in captured.out
+    assert excinfo.value.code == 0
+
+def test_parse_args_verbose():
+    args = ["-v"]
+    parsed_args = main.parse_args(args)
+    assert parsed_args.loglevel == logging.INFO
+
+def test_parse_args_very_verbose():
+    args = ["-vv"]
+    parsed_args = main.parse_args(args)
+    assert parsed_args.loglevel == logging.DEBUG
+
+@patch("k8soptimizer.main.optimize_deployment")
+@patch("k8soptimizer.main.verify_kubernetes_connection")
+@patch("k8soptimizer.main.verify_prometheus_connection")
+@patch("k8soptimizer.main.get_deployments")
+@patch("k8soptimizer.main.get_namespaces")
+def test_main(mock_func1, mock_func2, mock_func3, mock_func4, mock_func5):
+
+    # Define a list of V1Namespace objects
+    namespace1 = V1Namespace(metadata=V1ObjectMeta(name="namespace1"))
+    namespace2 = V1Namespace(metadata=V1ObjectMeta(name="namespace2"))
+    namespace_list = V1NamespaceList(items=[namespace1, namespace2])
+
+    # Define a list of V1Namespace objects
+    deployment1 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment1",
+            namespace="default",
+        ),
+        spec=V1DeploymentSpec(
+            replicas=1,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "1"}, limits={"cpu": "1"}
+                            ),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+    deployment2 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment2",
+            namespace="default",
+        ),
+        spec=V1DeploymentSpec(
+            replicas=2,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(limits={"cpu": "2"}),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+    deployment3 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment3",
+        ),
+        spec=V1DeploymentSpec(
+            replicas=0,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(limits={"cpu": "1"}),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+    deployment_list = V1DeploymentList(items=[deployment1, deployment2, deployment3])
+
+
+    mock_func1.return_value = namespace_list
+    mock_func2.return_value = deployment_list
+    mock_func3.return_value = True
+    mock_func4.return_value = True
+    mock_func5.return_value = True
+
+    main.stats["old_cpu_sum"] = 100
+    main.stats["new_cpu_sum"] = 150
+    main.stats["old_memory_sum"] = 1000
+    main.stats["new_memory_sum"] = 2000
+
+    main.main([])
