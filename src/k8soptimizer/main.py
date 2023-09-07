@@ -115,8 +115,9 @@ def verify_prometheus_connection() -> bool:
 @beartype
 def verify_kubernetes_connection() -> bool:
     try:
+        config.load_kube_config()
         client.ApisApi().get_api_versions_with_http_info()
-    except client.exceptions.ApiException:
+    except (config.exceptions.ConfigException, client.exceptions.ApiException):
         raise RuntimeError("Connection to kubernetes api failed")
     return True
 
