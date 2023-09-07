@@ -6,6 +6,21 @@ from beartype import beartype
 
 @beartype
 def convert_memory_request_to_bytes(size: str) -> int:
+    """
+    Convert a memory size string to bytes.
+
+    Args:
+        size (str): The memory size string (e.g., '1Gi', '512M', '2.5Ki').
+
+    Returns:
+        int: The size in bytes.
+
+    Raises:
+        ValueError: If the input size has an invalid format or unit.
+
+    Example:
+        size_in_bytes = convert_memory_request_to_bytes('2Gi')
+    """
     units = {
         "B": 1,
         "K": 1024,
@@ -36,6 +51,21 @@ def convert_memory_request_to_bytes(size: str) -> int:
 
 @beartype
 def convert_cpu_request_to_cores(size: str) -> float:
+    """
+    Convert a CPU request size string to cores.
+
+    Args:
+        size (str): The CPU request size string (e.g., '500m', '1k', '0.5').
+
+    Returns:
+        float: The size in cores.
+
+    Raises:
+        ValueError: If the input size has an invalid format or unit.
+
+    Example:
+        cores = convert_cpu_request_to_cores('2.5k')
+    """
     units = {"m": 1 / 1000, "k": 1000, "": 1}
 
     pattern = r"(\d+\.?\d?)(.*)?"
@@ -56,6 +86,18 @@ def convert_cpu_request_to_cores(size: str) -> float:
 
 @beartype
 def format_pairs(values: dict) -> str:
+    """
+    Format a dictionary of key-value pairs into a comma-separated string.
+
+    Args:
+        values (dict): A dictionary containing key-value pairs.
+
+    Returns:
+        str: A string containing formatted key-value pairs, separated by commas.
+
+    Example:
+        formatted_string = format_pairs({"key1": "value1", "key2": "value2"})
+    """
     formatted_pairs = []
     for key, value in values.items():
         formatted_pairs.append(f"{key}={value}")
@@ -63,13 +105,33 @@ def format_pairs(values: dict) -> str:
 
 
 def create_timestamp():
-    # n = datetime.now(datetime.timezone.utc)
+    """
+    Create a timestamp representing the current date and time in UTC.
+
+    Returns:
+        datetime: A datetime object representing the current UTC date and time.
+
+    Example:
+        timestamp = create_timestamp()
+    """
     return datetime.now(timezone.utc)
-    # return n.isoformat()  # '2021-07-13T15:28:51.818095+00:00'
 
 
 @beartype
 def calculate_minutes_ago_from_timestamp(datetime_object: datetime) -> int:
+    """
+    Calculate the number of minutes ago a given timestamp is from the current time.
+
+    Args:
+        datetime_object (datetime): The datetime object to calculate the minutes ago.
+
+    Returns:
+        int: The number of minutes ago.
+
+    Example:
+        timestamp = datetime(2023, 9, 7, 12, 0, tzinfo=timezone.utc)
+        minutes_ago = calculate_minutes_ago_from_timestamp(timestamp)
+    """
     current_time = datetime.now(timezone.utc)
     time_difference = current_time - datetime_object
     return int(time_difference.total_seconds() / 60)

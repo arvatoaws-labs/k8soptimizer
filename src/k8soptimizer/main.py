@@ -89,6 +89,21 @@ stats["new_memory_sum"] = 0
 
 @beartype
 def query_prometheus(query: str) -> dict:
+    """
+    Query Prometheus API with the specified query string.
+
+    Args:
+        query (str): The Prometheus query string.
+
+    Returns:
+        dict: The JSON response from the Prometheus API.
+
+    Raises:
+        RuntimeError: If the response is missing expected data fields.
+
+    Example:
+        response = query_prometheus('sum(rate(http_requests_total{job="api"}[5m]))')
+    """
     _logger.debug(query)
     response = requests.get(PROMETHEUS_URL + "/api/v1/query", params={"query": query})
     j = json.loads(response.text)
@@ -102,6 +117,18 @@ def query_prometheus(query: str) -> dict:
 
 @beartype
 def verify_prometheus_connection() -> bool:
+    """
+    Verify connection to the Prometheus API.
+
+    Returns:
+        bool: True if the connection is successful, False otherwise.
+
+    Raises:
+        RuntimeError: If the response is missing expected data fields or the connection fails.
+
+    Example:
+        connection_successful = verify_prometheus_connection()
+    """
     response = requests.get(PROMETHEUS_URL + "/api/v1/status/buildinfo")
     j = json.loads(response.text)
     _logger.debug(j)
@@ -114,6 +141,18 @@ def verify_prometheus_connection() -> bool:
 
 @beartype
 def verify_kubernetes_connection() -> bool:
+    """
+    Verify connection to the Kubernetes API.
+
+    Returns:
+        bool: True if the connection is successful, False otherwise.
+
+    Raises:
+        RuntimeError: If the connection to the Kubernetes API fails or if there is a configuration error.
+
+    Example:
+        connection_successful = verify_kubernetes_connection()
+    """
     try:
         config.load_kube_config()
         client.ApisApi().get_api_versions_with_http_info()
@@ -124,6 +163,18 @@ def verify_kubernetes_connection() -> bool:
 
 @beartype
 def get_max_cpu_cores_per_runtime(runtime: str) -> int:
+    """
+    Get the maximum number of CPU cores allowed per runtime.
+
+    Args:
+        runtime (str): The name of the runtime.
+
+    Returns:
+        int: The maximum number of CPU cores.
+
+    Example:
+        max_cores = get_max_cpu_cores_per_runtime("nodejs")
+    """
     if runtime == "nodejs":
         return 1
     return 100
@@ -136,6 +187,24 @@ def get_max_pods_per_deployment_history(
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     quantile_over_time: float = DEFAULT_QUANTILE_OVER_TIME,
 ) -> int:
+    """
+    Get the maximum number of pods for a deployment based on historical data.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        deployment_name (str): The name of the deployment.
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+        quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+
+    Returns:
+        int: The maximum number of pods.
+
+    Raises:
+        RuntimeError: If no data is found for the Prometheus query.
+
+    Example:
+        max_pods = get_max_pods_per_deployment_history("my-namespace", "my-deployment")
+    """
     query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{lookback_minutes}m]))'.format(
         quantile_over_time=quantile_over_time,
         namespace_name=namespace_name,
@@ -158,6 +227,26 @@ def get_cpu_cores_usage_history(
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     quantile_over_time: float = DEFAULT_QUANTILE_OVER_TIME,
 ) -> float:
+    """
+    Get the CPU cores usage history for a specific container.
+
+    Args:
+        namespace (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        container (str): The name of the container.
+        workload_type (str, optional): The type of workload. Default is "deployment".
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+        quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+
+    Returns:
+        float: The CPU cores usage value.
+
+    Raises:
+        RuntimeError: If no data is found for the Prometheus query.
+
+    Example:
+        cpu_usage = get_cpu_cores_usage_history("my-namespace", "my-deployment", "my-container")
+    """
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
         namespace=namespace,
@@ -182,6 +271,26 @@ def get_memory_bytes_usage_history(
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     quantile_over_time: float = DEFAULT_QUANTILE_OVER_TIME,
 ) -> float:
+    """
+    Get the memory usage history (in bytes) for a specific container.
+
+    Args:
+        namespace (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        container (str): The name of the container.
+        workload_type (str, optional): The type of workload. Default is "deployment".
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+        quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+
+    Returns:
+        float: The memory usage value in bytes.
+
+    Raises:
+        RuntimeError: If no data is found for the Prometheus query.
+
+    Example:
+        memory_usage = get_memory_bytes_usage_history("my-namespace", "my-deployment", "my-container")
+    """
     query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         quantile_over_time=quantile_over_time,
         namespace=namespace,
@@ -201,6 +310,21 @@ def get_memory_bytes_usage_history(
 def discover_container_runtime(
     namespace: str, workload: str, container: str, workload_type: str = "deployment"
 ) -> Optional[str]:
+    """
+    Discover the container runtime for a specific container.
+
+    Args:
+        namespace (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        container (str): The name of the container.
+        workload_type (str, optional): The type of workload. Default is "deployment".
+
+    Returns:
+        Optional[str]: The name of the container runtime, or None if it couldn't be determined.
+
+    Example:
+        runtime = discover_container_runtime("my-namespace", "my-deployment", "my-container")
+    """
     if is_nodejs_container(namespace, workload, container, workload_type):
         return "nodejs"
     return None
@@ -210,6 +334,19 @@ def discover_container_runtime(
 def get_hpa_for_deployment(
     namespace_name: str, deployment_name: str
 ) -> Optional[V2HorizontalPodAutoscaler]:
+    """
+    Get the Horizontal Pod Autoscaler (HPA) associated with a specific deployment.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        deployment_name (str): The name of the deployment.
+
+    Returns:
+        Optional[V2HorizontalPodAutoscaler]: The HPA object if found, or None if not found.
+
+    Example:
+        hpa = get_hpa_for_deployment("my-namespace", "my-deployment")
+    """
     autoscaling_api = client.AutoscalingV2Api()
     for hpa in autoscaling_api.list_namespaced_horizontal_pod_autoscaler(
         namespace=namespace_name
@@ -224,6 +361,19 @@ def get_hpa_for_deployment(
 
 @beartype
 def is_hpa_enabled_for_deployment(namespace_name: str, deployment_name: str) -> bool:
+    """
+    Check if Horizontal Pod Autoscaling (HPA) is enabled for a specific deployment.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        deployment_name (str): The name of the deployment.
+
+    Returns:
+        bool: True if HPA is enabled, False otherwise.
+
+    Example:
+        hpa_enabled = is_hpa_enabled_for_deployment("my-namespace", "my-deployment")
+    """
     return get_hpa_for_deployment(namespace_name, deployment_name) is not None
 
 
@@ -233,6 +383,20 @@ def calculate_hpa_target_ratio(
     deployment_name: str,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
 ) -> dict:
+    """
+    Calculate the target ratio for Horizontal Pod Autoscaling (HPA) based on historical data.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        deployment_name (str): The name of the deployment.
+        lookback_minutes (int, optional): The number of minutes to look back in time for historical data. Default is DEFAULT_LOOKBACK_MINUTES.
+
+    Returns:
+        dict: A dictionary with target ratios for CPU and memory.
+
+    Example:
+        target_ratios = calculate_hpa_target_ratio("my-namespace", "my-deployment")
+    """
     hpa_ratio_addon = 0
     hpa_min_replica = 0
     hpa_max_replica = 0
@@ -300,6 +464,23 @@ def calculate_cpu_requests(
     target_ratio_cpu: float,
     lookback_minutes: int,
 ) -> float:
+    """
+    Calculate the CPU requests for a specific container based on historical data and target ratio.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        workload_type (str): The type of workload.
+        container_name (str): The name of the container.
+        target_ratio_cpu (float): The target ratio for CPU.
+        lookback_minutes (int): The number of minutes to look back in time for historical data.
+
+    Returns:
+        float: The calculated CPU requests.
+
+    Example:
+        cpu_requests = calculate_cpu_requests("my-namespace", "my-workload", "deployment", "my-container", 1.5, 60)
+    """
     new_cpu = round(
         max(
             CPU_MIN,
@@ -335,6 +516,23 @@ def calculate_memory_requests(
     target_ratio_memory: float,
     lookback_minutes: int,
 ):
+    """
+    Calculate the memory requests for a specific container based on historical data, target ratio, and OOM history.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        workload_type (str): The type of workload.
+        container_name (str): The name of the container.
+        target_ratio_memory (float): The target ratio for memory.
+        lookback_minutes (int): The number of minutes to look back in time for historical data.
+
+    Returns:
+        int: The calculated memory requests in bytes.
+
+    Example:
+        memory_requests = calculate_memory_requests("my-namespace", "my-workload", "deployment", "my-container", 1.5, 60)
+    """
     if (
         get_oom_killed_history(
             namespace_name, workload, container_name, workload_type, lookback_minutes
@@ -370,6 +568,22 @@ def calculate_memory_limits(
     container_name: str,
     memory_requests: int,
 ) -> int:
+    """
+    Calculate the memory limits for a specific container based on memory requests.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        workload_type (str): The type of workload.
+        container_name (str): The name of the container.
+        memory_requests (int): The memory requests in bytes.
+
+    Returns:
+        int: The calculated memory limits in bytes.
+
+    Example:
+        memory_limits = calculate_memory_limits("my-namespace", "my-workload", "deployment", "my-container", 2048)
+    """
     new_memory_limit = max(
         MEMORY_LIMIT_MIN,
         min(MEMORY_LIMIT_MAX, memory_requests * MEMORY_LIMIT_RATIO),
@@ -379,6 +593,18 @@ def calculate_memory_limits(
 
 @beartype
 def get_namespaces(namespace_filter: str = ".*") -> V1NamespaceList:
+    """
+    Get a list of Kubernetes namespaces that match the specified filter.
+
+    Args:
+        namespace_filter (str, optional): A regular expression pattern to filter namespaces. Default is ".*".
+
+    Returns:
+        V1NamespaceList: A list of namespaces.
+
+    Example:
+        namespaces = get_namespaces("my-namespace.*")
+    """
     core_api = client.CoreV1Api()
     resp_ns = core_api.list_namespace(watch=False)
     items = []
@@ -403,6 +629,20 @@ def get_namespaces(namespace_filter: str = ".*") -> V1NamespaceList:
 def get_deployments(
     namespace_name: str, deployment_filter: str = ".*", only_running: bool = True
 ) -> V1DeploymentList:
+    """
+    Get a list of Kubernetes deployments in a specific namespace that match the specified filter.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        deployment_filter (str, optional): A regular expression pattern to filter deployments. Default is ".*".
+        only_running (bool, optional): Flag to include only running deployments. Default is True.
+
+    Returns:
+        V1DeploymentList: A list of deployments.
+
+    Example:
+        deployments = get_deployments("my-namespace", "my-deployment.*", only_running=True)
+    """
     apis_api = client.AppsV1Api()
     resp_deploy = apis_api.list_namespaced_deployment(namespace=namespace_name)
     items = []
@@ -436,6 +676,23 @@ def get_oom_killed_history(
     workload_type: str = "deployment",
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
 ) -> int:
+    """
+    Get the count of out-of-memory (OOM) events for a specific container based on historical data.
+
+    Args:
+        namespace (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        container (str): The name of the container.
+        workload_type (str, optional): The type of workload. Default is "deployment".
+        lookback_minutes (int, optional): The number of minutes to look back in time for historical data.
+                                         Default is the value of DEFAULT_LOOKBACK_MINUTES.
+
+    Returns:
+        int: The count of OOM events.
+
+    Example:
+        oom_count = get_oom_killed_history("my-namespace", "my-workload", "my-container", "deployment", 60)
+    """
     query = 'sum_over_time(kube_workload_container_resource_usage_memory_oom_killed{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         namespace=namespace,
         workload=workload,
@@ -458,6 +715,21 @@ def get_oom_killed_history(
 def is_nodejs_container(
     namespace: str, workload: str, container: str, workload_type: str = "deployment"
 ) -> bool:
+    """
+    Check if a container in a specific workload and namespace is a Node.js container.
+
+    Args:
+        namespace (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        container (str): The name of the container.
+        workload_type (str, optional): The type of workload. Default is "deployment".
+
+    Returns:
+        bool: True if the container is a Node.js container, False otherwise.
+
+    Example:
+        is_nodejs = is_nodejs_container("my-namespace", "my-workload", "my-container", "deployment")
+    """
     query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
         namespace=namespace,
         workload=workload,
@@ -477,6 +749,19 @@ def is_nodejs_container(
 
 @beartype
 def get_resources_from_deployment(deployment: V1Deployment) -> dict:
+    """
+    Get resource specifications (requests and limits) for containers in a deployment.
+
+    Args:
+        deployment (V1Deployment): The Kubernetes deployment object.
+
+    Returns:
+        dict: A dictionary containing resource specifications for each container.
+
+    Example:
+        deployment = get_deployment_by_name("my-namespace", "my-deployment")
+        resources = get_resources_from_deployment(deployment)
+    """
     res = {}
     for container in deployment.spec.template.spec.containers:
         res[container.name] = {}
@@ -493,6 +778,22 @@ def get_resources_from_deployment(deployment: V1Deployment) -> dict:
 
 @beartype
 def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int:
+    """
+    Calculate the lookback minutes based on a deployment's creation and last update timestamps.
+
+    Args:
+        deployment (V1Deployment): The Kubernetes deployment object.
+
+    Returns:
+        int: The calculated lookback minutes.
+
+    Raises:
+        RuntimeError: If the deployment is too young or was modified too recently.
+
+    Example:
+        deployment = get_deployment_by_name("my-namespace", "my-deployment")
+        lookback = calculate_loookback_minutes_from_deployment(deployment)
+    """
     lookback_minutes = DEFAULT_LOOKBACK_MINUTES
     creation_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
         deployment.metadata.creation_timestamp
@@ -523,6 +824,21 @@ def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int
 
 @beartype
 def optimize_deployment(deployment: V1Deployment, dry_run=True) -> V1Deployment:
+    """
+    Optimize the resources (CPU and memory) for containers in a deployment.
+
+    Args:
+        deployment (V1Deployment): The Kubernetes deployment object to be optimized.
+        dry_run (bool, optional): If True, the optimization changes will be simulated (dry-run mode).
+                                 If False, the changes will be applied. Default is True.
+
+    Returns:
+        V1Deployment: The optimized Kubernetes deployment object.
+
+    Example:
+        deployment = get_deployment_by_name("my-namespace", "my-deployment")
+        optimized_deployment = optimize_deployment(deployment, dry_run=True)
+    """
     apis_api = client.AppsV1Api()
     namespace_name = deployment.metadata.namespace
     deployment_name = deployment.metadata.name
@@ -584,6 +900,28 @@ def optimize_container(
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     current_replicas: int = 1,
 ) -> V1Container:
+    """
+    Optimize resources (CPU and memory) for a container.
+
+    Args:
+        namespace_name (str): The namespace of the container.
+        workload (str): The name of the workload associated with the container.
+        container (V1Container): The Kubernetes container object to be optimized.
+        workload_type (str, optional): The type of workload (e.g., "deployment"). Default is "deployment".
+        target_ratio_cpu (float, optional): The target ratio for CPU optimization. Default is 1.
+        target_ratio_memory (float, optional): The target ratio for memory optimization. Default is 1.
+        lookback_minutes (int, optional): The lookback minutes for historical data. Default is DEFAULT_LOOKBACK_MINUTES.
+        current_replicas (int, optional): The current number of replicas. Default is 1.
+
+    Returns:
+        V1Container: The optimized Kubernetes container object.
+
+    Example:
+        namespace = "my-namespace"
+        workload = "my-workload"
+        container = get_container_by_name(namespace, workload, "my-container")
+        optimized_container = optimize_container(namespace, workload, container, target_ratio_cpu=0.8)
+    """
     container_name = container.name
 
     _logger.info("Processing container: %s" % container_name)
@@ -628,6 +966,19 @@ def optimize_container(
 
 @beartype
 def get_cpu_requests_from_container(container: V1Container) -> float:
+    """
+    Get the CPU requests from a Kubernetes container.
+
+    Args:
+        container (V1Container): The Kubernetes container object.
+
+    Returns:
+        float: The CPU requests in cores.
+
+    Example:
+        container = V1Container(name="my-container", resources=V1ResourceRequirements(requests={"cpu": "100m"}))
+        cpu_requests = get_cpu_requests_from_container(container)
+    """
     try:
         old_cpu = helpers.convert_cpu_request_to_cores(
             container.resources.requests["cpu"]
@@ -639,6 +990,19 @@ def get_cpu_requests_from_container(container: V1Container) -> float:
 
 @beartype
 def get_memory_requests_from_container(container: V1Container) -> int:
+    """
+    Get the memory requests from a Kubernetes container.
+
+    Args:
+        container (V1Container): The Kubernetes container object.
+
+    Returns:
+        int: The memory requests in bytes.
+
+    Example:
+        container = V1Container(name="my-container", resources=V1ResourceRequirements(requests={"memory": "2Gi"}))
+        memory_requests = get_memory_requests_from_container(container)
+    """
     try:
         old_memory = helpers.convert_memory_request_to_bytes(
             container.resources.requests["memory"]
@@ -650,6 +1014,19 @@ def get_memory_requests_from_container(container: V1Container) -> int:
 
 @beartype
 def get_memory_limits_from_container(container: V1Container) -> int:
+    """
+    Get the memory limits from a Kubernetes container.
+
+    Args:
+        container (V1Container): The Kubernetes container object.
+
+    Returns:
+        int: The memory limits in bytes.
+
+    Example:
+        container = V1Container(name="my-container", resources=V1ResourceRequirements(limits={"memory": "4Gi"}))
+        memory_limits = get_memory_limits_from_container(container)
+    """
     try:
         old_memory = helpers.convert_memory_request_to_bytes(
             container.resources.limits["memory"]
@@ -668,6 +1045,26 @@ def optimize_container_cpu_requests(
     target_ratio: float = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
 ) -> float:
+    """
+    Optimize CPU requests for a Kubernetes container.
+
+    Args:
+        namespace_name (str): The namespace of the workload.
+        workload (str): The name of the workload.
+        container (V1Container): The Kubernetes container object.
+        workload_type (str, optional): The type of workload. Defaults to "deployment".
+        target_ratio (float, optional): The target ratio for CPU optimization. Defaults to 1.
+        lookback_minutes (int, optional): The number of minutes to look back for resource usage data. Defaults to DEFAULT_LOOKBACK_MINUTES.
+
+    Returns:
+        float: The new CPU request in cores.
+
+    Example:
+        namespace_name = "my-namespace"
+        workload = "my-workload"
+        container = V1Container(name="my-container", resources=V1ResourceRequirements(requests={"cpu": "100m"}))
+        new_cpu = optimize_container_cpu_requests(namespace_name, workload, container)
+    """
     container_name = container.name
 
     try:
@@ -714,6 +1111,26 @@ def optimize_container_memory_requests(
     target_ratio: float = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
 ) -> int:
+    """
+    Optimize memory requests for a Kubernetes container.
+
+    Args:
+        namespace_name (str): The namespace of the workload.
+        workload (str): The name of the workload.
+        container (V1Container): The Kubernetes container object.
+        workload_type (str, optional): The type of workload. Defaults to "deployment".
+        target_ratio (float, optional): The target ratio for memory optimization. Defaults to 1.
+        lookback_minutes (int, optional): The number of minutes to look back for resource usage data. Defaults to DEFAULT_LOOKBACK_MINUTES.
+
+    Returns:
+        int: The new memory request in bytes.
+
+    Example:
+        namespace_name = "my-namespace"
+        workload = "my-workload"
+        container = V1Container(name="my-container", resources=V1ResourceRequirements(requests={"memory": "1Gi"}))
+        new_memory = optimize_container_memory_requests(namespace_name, workload, container)
+    """
     container_name = container.name
 
     try:
@@ -757,6 +1174,25 @@ def optimize_container_memory_limits(
     workload_type: str = "deployment",
     new_memory: int = MEMORY_MIN,
 ) -> int:
+    """
+    Optimize memory limits for a Kubernetes container.
+
+    Args:
+        namespace_name (str): The namespace of the workload.
+        workload (str): The name of the workload.
+        container (V1Container): The Kubernetes container object.
+        workload_type (str, optional): The type of workload. Defaults to "deployment".
+        new_memory (int, optional): The new memory request in bytes. Defaults to MEMORY_MIN.
+
+    Returns:
+        int: The new memory limit in bytes.
+
+    Example:
+        namespace_name = "my-namespace"
+        workload = "my-workload"
+        container = V1Container(name="my-container", resources=V1ResourceRequirements(limits={"memory": "2Gi"}))
+        new_memory_limit = optimize_container_memory_limits(namespace_name, workload, container)
+    """
     container_name = container.name
 
     try:
