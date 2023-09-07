@@ -1,38 +1,38 @@
-import argparse
-import pytest
 import json
-import unittest
 import logging
-from datetime import datetime, timezone, timedelta
+import unittest
+from datetime import datetime, timedelta, timezone
 
 # Standard library imports...
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from kubernetes.client.models import *
+import pytest
+from kubernetes.client.models import (
+    V1Container,
+    V1Deployment,
+    V1DeploymentList,
+    V1DeploymentSpec,
+    V1LabelSelector,
+    V1Namespace,
+    V1NamespaceList,
+    V1ObjectMeta,
+    V1PodSpec,
+    V1PodTemplateSpec,
+    V1ResourceRequirements,
+    V2CrossVersionObjectReference,
+    V2HorizontalPodAutoscaler,
+    V2HorizontalPodAutoscalerList,
+    V2HorizontalPodAutoscalerSpec,
+    V2MetricSpec,
+    V2MetricTarget,
+    V2ResourceMetricSource,
+)
 
 import k8soptimizer.main as main
 
 __author__ = "Philipp Hellmich"
 __copyright__ = "Philipp Hellmich"
 __license__ = "MIT"
-
-
-# def test_fib():
-#     """API Tests"""
-#     assert fib(1) == 1
-#     assert fib(2) == 1
-#     assert fib(7) == 13
-#     with pytest.raises(AssertionError):
-#         fib(-10)
-
-
-# def test_main(capsys):
-#     """CLI Tests"""
-#     # capsys is a pytest fixture that allows asserts against stdout/stderr
-#     # https://docs.pytest.org/en/stable/capture.html
-#     main(["7"])
-#     captured = capsys.readouterr()
-#     assert "The 7-th Fibonacci number is 13" in captured.out
 
 
 @patch("requests.get")  # Mock the requests.get function
@@ -50,6 +50,23 @@ def test_query_prometheus(mock_requests_get):
 
     # Verify that the function behaves as expected
     assert result == expected_result  # Check if the result is as expected
+
+
+@patch("requests.get")  # Mock the requests.get function
+def test_verify_prometheus_connection(mock_requests_get):
+    # Define your test data and expected response
+    expected_result = {"status": "success"}
+
+    # Mock the response from requests.get
+    mock_response = unittest.mock.Mock()
+    mock_response.text = json.dumps(expected_result)
+    mock_requests_get.return_value = mock_response
+
+    # Call the function under test
+    result = main.verify_prometheus_connection()
+
+    # Verify that the function behaves as expected
+    assert result is True  # Check if the result is as expected
 
 
 @patch("k8soptimizer.main.query_prometheus")
@@ -665,13 +682,24 @@ test_data_memory = [
         },
         "expected_output": main.MEMORY_MAX,
     },
+    # Test case 6: OOM killed
+    {
+        "input_params": {
+            "memory_history": main.MEMORY_MIN + 1024,
+            "memory_ratio": 1.0,
+            "runtime": None,
+            "oom_killed": 11,
+        },
+        "expected_output": (main.MEMORY_MIN + 1024) * 2,
+    },
 ]
 
 
 @pytest.mark.parametrize("test_case", test_data_memory)
+@patch("k8soptimizer.main.get_oom_killed_history")
 @patch("k8soptimizer.main.discover_container_runtime")
 @patch("k8soptimizer.main.get_memory_bytes_usage_history")
-def test_calculate_memory_requests(mock_func1, mock_func2, test_case):
+def test_calculate_memory_requests(mock_func1, mock_func2, mock_func3, test_case):
     namespace_name = "test_namespace"
     deployment_name = "test_deployment"
     input_params = test_case["input_params"]
@@ -679,9 +707,12 @@ def test_calculate_memory_requests(mock_func1, mock_func2, test_case):
 
     mock_func1.return_value = input_params["memory_history"]
     mock_func2.return_value = None
+    mock_func3.return_value = 0
 
     if "runtime" in input_params:
         mock_func2.return_value = input_params["runtime"]
+    if "oom_killed" in input_params:
+        mock_func3.return_value = input_params["oom_killed"]
 
     # Call the function under test
     result = main.calculate_memory_requests(
@@ -1016,3 +1047,31 @@ def test_main(mock_func1, mock_func2, mock_func3, mock_func4, mock_func5):
     main.stats["new_memory_sum"] = 2000
 
     main.main([])
+
+
+@patch("k8soptimizer.main.query_prometheus")
+def test_get_oom_killed_history(mock_func1):
+    # Define your test data and expected response
+    namespace_name = "test_namespace"
+    deployment_name = "test_deployment"
+    container_name = "test_container"
+
+    mock_func1.return_value = {"data": {"result": [{"value": [0, 1]}]}}
+
+    # Call the function under test
+    result = main.get_oom_killed_history(
+        namespace_name, deployment_name, container_name
+    )
+
+    # Verify that the function behaves as expected
+    assert result == 1  # Check if the result is as expected
+
+    mock_func1.return_value = {"data": {"result": [{"value": [0, 0]}]}}
+
+    # Call the function under test
+    result = main.get_oom_killed_history(
+        namespace_name, deployment_name, container_name
+    )
+
+    # Verify that the function behaves as expected
+    assert result == 0  # Check if the result is as expected

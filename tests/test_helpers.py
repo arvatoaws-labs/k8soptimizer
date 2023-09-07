@@ -1,10 +1,6 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
-
-# Standard library imports...
-from unittest.mock import Mock, patch
-
-from kubernetes.client.models import *
 
 import k8soptimizer.helpers as helpers
 
@@ -25,21 +21,26 @@ def test_convert_memory_request_to_bytes():
     assert helpers.convert_memory_request_to_bytes("1Ti") == 1024**4
 
     with pytest.raises(ValueError) as exc_info:
-        result = helpers.convert_memory_request_to_bytes("hallo")
-    assert str(exc_info.value) == "Invalid format"
+        helpers.convert_memory_request_to_bytes("hallo")
+    assert str(exc_info.value).startswith("Invalid format")
 
     with pytest.raises(ValueError) as exc_info:
-        result = helpers.convert_memory_request_to_bytes("1Jon")
-    assert str(exc_info.value) == "Invalid unit"
+        helpers.convert_memory_request_to_bytes("1Jon")
+    assert str(exc_info.value).startswith("Invalid unit")
 
 
 def test_convert_cpu_request_to_cores():
     assert helpers.convert_cpu_request_to_cores("1000m") == 1
     assert helpers.convert_cpu_request_to_cores("1000k") == 1000000
+    assert helpers.convert_cpu_request_to_cores("1") == 1
 
     with pytest.raises(ValueError) as exc_info:
-        result = helpers.convert_cpu_request_to_cores("1z")
-    assert str(exc_info.value) == "Invalid unit"
+        helpers.convert_cpu_request_to_cores("1z")
+    assert str(exc_info.value).startswith("Invalid unit")
+
+    with pytest.raises(ValueError) as exc_info:
+        helpers.convert_cpu_request_to_cores("OTTO")
+    assert str(exc_info.value).startswith("Invalid format")
 
 
 def test_format_pairs():

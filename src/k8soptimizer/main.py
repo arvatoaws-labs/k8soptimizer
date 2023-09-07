@@ -21,22 +21,25 @@ References:
 """
 
 import argparse
+import json
 import logging
+import os
+import re
 import sys
+from typing import Optional
 
 import requests
-import json
-import re
-import os
-
-from typing import Optional
 from beartype import beartype
-
 from kubernetes import client, config
-from kubernetes.client.models import *
+from kubernetes.client.models import (
+    V1Container,
+    V1Deployment,
+    V1DeploymentList,
+    V1NamespaceList,
+    V2HorizontalPodAutoscaler,
+)
 
-from k8soptimizer import __version__
-from k8soptimizer import helpers
+from k8soptimizer import __version__, helpers
 
 __author__ = "Philipp Hellmich"
 __copyright__ = "Arvato Systems GmbH"
@@ -113,7 +116,7 @@ def verify_prometheus_connection() -> bool:
 def verify_kubernetes_connection() -> bool:
     try:
         client.ApisApi().get_api_versions_with_http_info()
-    except:
+    except client.exceptions.ApiException:
         raise RuntimeError("Connection to kubernetes api failed")
     return True
 
@@ -200,27 +203,6 @@ def discover_container_runtime(
     if is_nodejs_container(namespace, workload, container, workload_type):
         return "nodejs"
     return None
-
-
-@beartype
-def is_nodejs_container(
-    namespace: str, workload: str, container: str, workload_type: str = "deployment"
-) -> bool:
-    query = 'count(nodejs_version_info{{container="{container}"}} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{{workload="{workload}", workload_type="{workload_type}", namespace="{namespace}"}}) by (namespace, workload, workload_type, container)'.format(
-        namespace=namespace,
-        workload=workload,
-        workload_type=workload_type,
-        container=container,
-    )
-    j = query_prometheus(query)
-
-    if j["data"]["result"] == []:
-        return False
-
-    if float(j["data"]["result"][0]["value"][1]) > 0:
-        return True
-
-    return False
 
 
 @beartype
@@ -405,7 +387,7 @@ def get_namespaces(namespace_filter: str = ".*") -> V1NamespaceList:
         namespace_name = namespace.metadata.name
 
         x = re.search(namespace_filter, namespace_name)
-        if x == None:
+        if x is None:
             _logger.debug(
                 "Skipping namespace due to NAMESPACE_FILTER: %s" % namespace_name
             )
@@ -428,7 +410,7 @@ def get_deployments(
         deployment_name = deployment.metadata.name
 
         x = re.search(deployment_filter, deployment_name)
-        if x == None:
+        if x is None:
             _logger.debug(
                 "Skipping deployment due to DEPLOYMENT_FILTER: %s" % deployment_name
             )
@@ -443,74 +425,6 @@ def get_deployments(
         items.append(deployment)
 
     return V1DeploymentList(items=items)
-
-
-@beartype
-def get_max_pods_per_deployment_history(
-    namespace_name: str,
-    deployment_name: str,
-    lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-    quantile_over_time: float = DEFAULT_QUANTILE_OVER_TIME,
-) -> int:
-    query = 'max(quantile_over_time({quantile_over_time}, kube_deployment_spec_replicas{{job="kube-state-metrics", namespace="{namespace_name}", deployment="{deployment_name}"}}[{lookback_minutes}m]))'.format(
-        quantile_over_time=quantile_over_time,
-        namespace_name=namespace_name,
-        deployment_name=deployment_name,
-        lookback_minutes=lookback_minutes,
-    )
-    j = query_prometheus(query)
-
-    if j["data"]["result"] == []:
-        raise RuntimeError("No data found for prometheus query: {}".format(query))
-    return int(j["data"]["result"][0]["value"][1])
-
-
-@beartype
-def get_cpu_cores_usage_history(
-    namespace: str,
-    workload: str,
-    container: str,
-    workload_type: str = "deployment",
-    lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-    quantile_over_time: float = DEFAULT_QUANTILE_OVER_TIME,
-) -> float:
-    query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
-        quantile_over_time=quantile_over_time,
-        namespace=namespace,
-        workload=workload,
-        workload_type=workload_type,
-        container=container,
-        lookback_minutes=lookback_minutes,
-    )
-    j = query_prometheus(query)
-
-    if j["data"]["result"] == []:
-        raise RuntimeError("No data found for prometheus query: {}".format(query))
-    return float(j["data"]["result"][0]["value"][1])
-
-
-@beartype
-def get_memory_bytes_usage_history(
-    namespace: str,
-    workload: str,
-    container: str,
-    workload_type: str = "deployment",
-    lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-    quantile_over_time: float = DEFAULT_QUANTILE_OVER_TIME,
-) -> float:
-    query = 'quantile_over_time({quantile_over_time}, kube_workload_container_resource_usage_memory_bytes_max{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
-        quantile_over_time=quantile_over_time,
-        namespace=namespace,
-        workload=workload,
-        workload_type=workload_type,
-        container=container,
-        lookback_minutes=lookback_minutes,
-    )
-    j = query_prometheus(query)
-
-    if j["data"]["result"] == []:
-        raise RuntimeError("No data found for prometheus query: {}".format(query))
-    return float(j["data"]["result"][0]["value"][1])
 
 
 @beartype
@@ -567,11 +481,11 @@ def get_resources_from_deployment(deployment: V1Deployment) -> dict:
         res[container.name] = {}
         try:
             res[container.name]["requests"] = container.resources.requests
-        except:
+        except AttributeError:
             res[container.name]["requests"] = {}
         try:
             res[container.name]["limits"] = container.resources.limits
-        except:
+        except AttributeError:
             res[container.name]["limits"] = {}
     return res
 
@@ -641,7 +555,7 @@ def optimize_deployment(deployment: V1Deployment, dry_run=True) -> V1Deployment:
     ] = helpers.create_timestamp()
 
     # Apply the changes
-    if dry_run == True:
+    if dry_run is True:
         _logger.info("Updating (dry-run) deployment: %s" % deployment_name)
         apis_api.patch_namespaced_deployment(
             deployment_name,
@@ -714,10 +628,10 @@ def optimize_container(
 @beartype
 def get_cpu_requests_from_container(container: V1Container) -> float:
     try:
-        old_cpu = helpers.convert_memory_request_to_bytes(
+        old_cpu = helpers.convert_cpu_request_to_cores(
             container.resources.requests["cpu"]
         )
-    except:
+    except (KeyError, AttributeError):
         old_cpu = 0.001
     return float(old_cpu)
 
@@ -728,7 +642,7 @@ def get_memory_requests_from_container(container: V1Container) -> int:
         old_memory = helpers.convert_memory_request_to_bytes(
             container.resources.requests["memory"]
         )
-    except:
+    except (KeyError, AttributeError):
         old_memory = 1024**2 * 1
     return int(old_memory)
 
@@ -739,7 +653,7 @@ def get_memory_limits_from_container(container: V1Container) -> int:
         old_memory = helpers.convert_memory_request_to_bytes(
             container.resources.limits["memory"]
         )
-    except:
+    except (KeyError, AttributeError):
         old_memory = 1024**2 * 1
     return int(old_memory)
 
@@ -760,7 +674,7 @@ def optimize_container_cpu_requests(
         old_cpu = helpers.convert_cpu_request_to_cores(
             container.resources.requests["cpu"]
         )
-    except:
+    except (KeyError, AttributeError):
         _logger.info("Could not read old CPU requests aassuming it is 0.001")
         old_cpu = 0.001
 
@@ -806,7 +720,7 @@ def optimize_container_memory_requests(
         old_memory = helpers.convert_memory_request_to_bytes(
             container.resources.requests["memory"]
         )
-    except:
+    except (KeyError, AttributeError):
         _logger.info("Could not read old meory requests aassuming it is 1")
         old_memory = 1
 
@@ -848,7 +762,7 @@ def optimize_container_memory_limits(
         old_memory_limit = helpers.convert_memory_request_to_bytes(
             container.resources.limits["memory"]
         )
-    except:
+    except (KeyError, AttributeError):
         _logger.info("Could not read old meory limits aassuming it is 1")
         old_memory_limit = 1
 

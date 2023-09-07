@@ -1,7 +1,6 @@
 import re
-import datetime
-from datetime import datetime, timezone, timedelta
-from dateutil import parser
+from datetime import datetime, timezone
+
 from beartype import beartype
 
 
@@ -26,10 +25,10 @@ def convert_memory_request_to_bytes(size: str) -> int:
         value = float(match.group(1))
         unit = match.group(3)
     else:
-        raise ValueError("Invalid format")
+        raise ValueError("Invalid format: {}".format(size))
 
     if unit not in units:
-        raise ValueError("Invalid unit")
+        raise ValueError("Invalid unit: {}".format(unit))
 
     bytes_value = value * units[unit]
     return int(bytes_value)
@@ -37,17 +36,22 @@ def convert_memory_request_to_bytes(size: str) -> int:
 
 @beartype
 def convert_cpu_request_to_cores(size: str) -> float:
-    units = {"m": 1 / 1000, "k": 1000}
+    units = {"m": 1 / 1000, "k": 1000, "": 1}
 
-    size = size.strip()
-    unit = size[-1]
-    value = float(size[:-1])
+    pattern = r"(\d+\.?\d?)(.*)?"
+    match = re.match(pattern, size)
+
+    if match:
+        value = float(match.group(1))
+        unit = match.group(2)
+    else:
+        raise ValueError("Invalid format: {}".format(size))
 
     if unit not in units:
-        raise ValueError("Invalid unit")
+        raise ValueError("Invalid unit: {}".format(unit))
 
-    number_value = value * units[unit]
-    return number_value
+    bytes_value = value * units[unit]
+    return float(bytes_value)
 
 
 @beartype
