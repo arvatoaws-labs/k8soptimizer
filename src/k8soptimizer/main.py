@@ -855,9 +855,6 @@ def main(args):
     setup_logging(args.loglevel)
     _logger.info("Starting k8soptimizer...")
 
-    # Configs can be set in Configuration class directly or using helper utility
-    config.load_kube_config()
-
     verify_kubernetes_connection()
     verify_prometheus_connection()
 
