@@ -6,7 +6,7 @@ from beartype import beartype
 
 
 @beartype
-def convert_to_bytes(size: str) -> int:
+def convert_memory_request_to_bytes(size: str) -> int:
     units = {
         "B": 1,
         "K": 1024,
@@ -36,7 +36,7 @@ def convert_to_bytes(size: str) -> int:
 
 
 @beartype
-def convert_to_number(size: str) -> int:
+def convert_cpu_request_to_cores(size: str) -> float:
     units = {"m": 1 / 1000, "k": 1000}
 
     size = size.strip()
@@ -47,7 +47,7 @@ def convert_to_number(size: str) -> int:
         raise ValueError("Invalid unit")
 
     number_value = value * units[unit]
-    return round(number_value)
+    return number_value
 
 
 @beartype

@@ -288,19 +288,15 @@ def calculate_hpa_target_ratio(
         )
     )
 
-    oom_killed_history = round(
-        get_oom_killed_history(namespace_name, deployment_name, lookback_minutes)
-    )
-
-    _logger.debug("Hpa min repliacs: %s" % hpa_min_replica)
-    _logger.debug("Hpa max replicas: %s" % hpa_max_replica)
-    _logger.debug("Hpa avg count history: %s" % replica_count_history)
+    _logger.info("Hpa min repliacs: %s" % hpa_min_replica)
+    _logger.info("Hpa max replicas: %s" % hpa_max_replica)
+    _logger.info("Hpa avg count history: %s" % replica_count_history)
 
     # increase cpu request if current replica count is higher than min replica count
     if replica_count_history > hpa_min_replica and hpa_range > 0:
-        _logger.debug("Hpa avg range: %s" % hpa_range)
+        _logger.info("Hpa avg range: %s" % hpa_range)
         hpa_range_position = replica_count_history - hpa_min_replica
-        _logger.debug("Hpa avg range position: %s" % hpa_range_position)
+        _logger.info("Hpa avg range position: %s" % hpa_range_position)
         hpa_ratio_addon = round((hpa_range_position) / hpa_range, 2)
 
     if hpa_ratio_addon > 0.5:
@@ -308,10 +304,6 @@ def calculate_hpa_target_ratio(
             "Increasing target ratio cpu due to hpa near limit: %s" % hpa_ratio_addon
         )
         target_ratio_cpu = round(target_ratio_cpu + hpa_ratio_addon, 3)
-
-    # increase memory request if oom was detected
-    if oom_killed_history > 0:
-        target_ratio_memory = 2
 
     return {"cpu": float(target_ratio_cpu), "memory": float(target_ratio_memory)}
 
@@ -360,6 +352,14 @@ def calculate_memory_requests(
     target_ratio_memory: float,
     lookback_minutes: int,
 ):
+    if (
+        get_oom_killed_history(
+            namespace_name, workload, container_name, workload_type, lookback_minutes
+        )
+        > 0
+    ):
+        target_ratio_memory = target_ratio_memory * 2
+
     new_memory = round(
         max(
             MEMORY_MIN,
@@ -385,8 +385,8 @@ def calculate_memory_limits(
     workload: str,
     workload_type: str,
     container_name: str,
-    memory_requests: float,
-) -> float:
+    memory_requests: int,
+) -> int:
     new_memory_limit = max(
         MEMORY_LIMIT_MIN,
         min(MEMORY_LIMIT_MAX, memory_requests * MEMORY_LIMIT_RATIO),
@@ -520,7 +520,7 @@ def get_oom_killed_history(
     container: str,
     workload_type: str = "deployment",
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-) -> float:
+) -> int:
     query = 'sum_over_time(kube_workload_container_resource_usage_memory_oom_killed{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}", container="{container}"}}[{lookback_minutes}m])'.format(
         namespace=namespace,
         workload=workload,
@@ -534,7 +534,7 @@ def get_oom_killed_history(
         return 0
 
     if float(j["data"]["result"][0]["value"][1]) > 0:
-        return float(j["data"]["result"][0]["value"][1])
+        return round(float(j["data"]["result"][0]["value"][1]))
 
     return 0
 
@@ -692,7 +692,7 @@ def optimize_container(
         lookback_minutes,
     )
     new_memory_limit = optimize_container_memory_limits(
-        namespace_name, workload, container, workload_type, target_ratio_memory
+        namespace_name, workload, container, workload_type, new_memory
     )
 
     stats["old_cpu_sum"] += old_cpu * current_replicas
@@ -714,42 +714,52 @@ def optimize_container(
 @beartype
 def get_cpu_requests_from_container(container: V1Container) -> float:
     try:
-        old_cpu = helpers.convert_to_bytes(container.resources.requests["cpu"])
+        old_cpu = helpers.convert_memory_request_to_bytes(
+            container.resources.requests["cpu"]
+        )
     except:
         old_cpu = 0.001
-    return old_cpu
+    return float(old_cpu)
 
 
 @beartype
 def get_memory_requests_from_container(container: V1Container) -> int:
     try:
-        old_memory = helpers.convert_to_bytes(container.resources.requests["memory"])
+        old_memory = helpers.convert_memory_request_to_bytes(
+            container.resources.requests["memory"]
+        )
     except:
         old_memory = 1024**2 * 1
-    return old_memory
+    return int(old_memory)
 
 
 @beartype
 def get_memory_limits_from_container(container: V1Container) -> int:
     try:
-        old_memory = helpers.convert_to_bytes(container.resources.limits["memory"])
+        old_memory = helpers.convert_memory_request_to_bytes(
+            container.resources.limits["memory"]
+        )
     except:
         old_memory = 1024**2 * 1
-    return old_memory
+    return int(old_memory)
 
 
 @beartype
 def optimize_container_cpu_requests(
     namespace_name: str,
     workload: str,
-    container: str,
+    container: V1Container,
     workload_type: str = "deployment",
     target_ratio: float = 1,
-    lookback_minutes: float = DEFAULT_LOOKBACK_MINUTES,
+    lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
 ) -> float:
     container_name = container.name
+
     try:
-        old_cpu = helpers.convert_to_bytes(container.resources.requests["cpu"])
+        _logger.debug(container.resources.requests["cpu"])
+        old_cpu = helpers.convert_cpu_request_to_cores(
+            container.resources.requests["cpu"]
+        )
     except:
         _logger.info("Could not read old CPU requests aassuming it is 0.001")
         old_cpu = 0.001
@@ -777,22 +787,25 @@ def optimize_container_cpu_requests(
             )
         )
 
-    return new_cpu
+    return float(new_cpu)
 
 
 @beartype
 def optimize_container_memory_requests(
     namespace_name: str,
     workload: str,
-    container: str,
+    container: V1Container,
     workload_type: str = "deployment",
     target_ratio: float = 1,
-    lookback_minutes: float = DEFAULT_LOOKBACK_MINUTES,
+    lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
 ) -> int:
     container_name = container.name
 
     try:
-        old_memory = helpers.convert_to_bytes(container.resources.requests["memory"])
+        _logger.debug(container.resources.requests["memory"])
+        old_memory = helpers.convert_memory_request_to_bytes(
+            container.resources.requests["memory"]
+        )
     except:
         _logger.info("Could not read old meory requests aassuming it is 1")
         old_memory = 1
@@ -818,21 +831,21 @@ def optimize_container_memory_requests(
                 diff_memory,
             )
         )
-    return new_memory
+    return int(new_memory)
 
 
 @beartype
 def optimize_container_memory_limits(
     namespace_name: str,
     workload: str,
-    container: str,
+    container: V1Container,
     workload_type: str = "deployment",
     new_memory: int = MEMORY_MIN,
 ) -> int:
     container_name = container.name
 
     try:
-        old_memory_limit = helpers.convert_to_bytes(
+        old_memory_limit = helpers.convert_memory_request_to_bytes(
             container.resources.limits["memory"]
         )
     except:
@@ -856,7 +869,7 @@ def optimize_container_memory_limits(
             )
         )
 
-    return new_memory_limit
+    return int(new_memory_limit)
 
 
 # ---- CLI ----

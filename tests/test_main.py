@@ -447,7 +447,7 @@ test_data_hpa = [
             "pod_replica_history": 3,
             "pod_oom_history": 5,
         },
-        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 2.0},
+        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.0},
     },
     # Test case 7: Expected to raise CPU and memory ratio because almost max_replicas is reached and ooms werde found
     {
@@ -459,7 +459,7 @@ test_data_hpa = [
             "pod_replica_history": 3,
             "pod_oom_history": 5,
         },
-        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 2.0},
+        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.0},
     },
     # Test case 8: Expected to raise both CPU and memory ratio to match HPA even if history is 0
     {
