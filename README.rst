@@ -7,9 +7,6 @@
     .. image:: https://readthedocs.org/projects/k8soptimizer/badge/?version=latest
         :alt: ReadTheDocs
         :target: https://k8soptimizer.readthedocs.io/en/stable/
-    .. image:: https://img.shields.io/coveralls/github/<USER>/k8soptimizer/main.svg
-        :alt: Coveralls
-        :target: https://coveralls.io/r/<USER>/k8soptimizer
     .. image:: https://img.shields.io/pypi/v/k8soptimizer.svg
         :alt: PyPI-Server
         :target: https://pypi.org/project/k8soptimizer/
@@ -26,6 +23,9 @@
 .. image:: https://img.shields.io/badge/-PyScaffold-005CA0?logo=pyscaffold
     :alt: Project generated with PyScaffold
     :target: https://pyscaffold.org/
+.. image:: https://img.shields.io/coveralls/github/arvatoaws-labs/k8soptimizer/main.svg
+    :alt: Coveralls
+    :target: https://coveralls.io/r/arvatoaws-labs/k8soptimizer
 
 |
 
