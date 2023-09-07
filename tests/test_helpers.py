@@ -1,5 +1,5 @@
 import pytest
-import datetime
+from datetime import datetime, timezone, timedelta
 
 # Standard library imports...
 from unittest.mock import Mock, patch
@@ -49,21 +49,15 @@ def test_format_pairs():
 
 def test_calculate_minutes_ago():
     # Create datetime objects from timestamp strings
-    timestamp1 = datetime.fromisoformat("2022-07-13T11:46:45Z")
-    timestamp2 = datetime.fromisoformat("2012-07-13T11:46:45Z")
-    timestamp3 = datetime.fromisoformat("2050-07-13T11:46:45Z")
-    timestamp4 = datetime.fromisoformat("2023-07-28T13:55:23+00:00")
+    timestamp1 = datetime.now(timezone.utc) - timedelta(days=1)
+    timestamp2 = datetime.now(timezone.utc) - timedelta(minutes=15)
+    timestamp3 = datetime.now(timezone.utc)
 
     # Use the calculate_minutes_ago_from_timestamp function
-    assert helpers.calculate_minutes_ago_from_timestamp(timestamp1) > 60 * 24 * 365
-    assert helpers.calculate_minutes_ago_from_timestamp(timestamp2) > 60 * 24 * 365 * 10
-    assert helpers.calculate_minutes_ago_from_timestamp(timestamp3) < 0
-    assert helpers.calculate_minutes_ago_from_timestamp(timestamp4) > 0
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp1) == 60 * 24
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp2) == 15
+    assert helpers.calculate_minutes_ago_from_timestamp(timestamp3) == 0
 
 
 def test_create_timestamp_str():
-    assert (
-        helpers.calculate_minutes_ago_from_timestamp(helpers.create_timestamp_str())
-        == 0
-    )
-    assert len(helpers.create_timestamp_str()) == 32
+    assert helpers.calculate_minutes_ago_from_timestamp(helpers.create_timestamp()) == 0

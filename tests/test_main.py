@@ -384,7 +384,7 @@ test_data_hpa = [
             "max_replicas": 10,
             "pod_replica_history": 3,
         },
-        "expected_output": {"ratio_cpu": 1, "ratio_memory": 1},
+        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.0},
     },
     # Test case 1: Expected to raise CPU ratio to match HPA
     {
@@ -404,7 +404,7 @@ test_data_hpa = [
             "max_replicas": 10,
             "pod_replica_history": 3,
         },
-        "expected_output": {"ratio_cpu": 1, "ratio_memory": 1.25},
+        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.25},
     },
     # Test case 3: Expected to raise both CPU and memory ratio to match HPA
     {
@@ -425,7 +425,7 @@ test_data_hpa = [
             "max_replicas": 10,
             "pod_replica_history": 10,
         },
-        "expected_output": {"ratio_cpu": 2, "ratio_memory": 1},
+        "expected_output": {"ratio_cpu": 2.0, "ratio_memory": 1.0},
     },
     # Test case 5: Expected to raise CPU because is almost max_replicas reached
     {
@@ -435,7 +435,7 @@ test_data_hpa = [
             "max_replicas": 10,
             "pod_replica_history": 9,
         },
-        "expected_output": {"ratio_cpu": 1.89, "ratio_memory": 1},
+        "expected_output": {"ratio_cpu": 1.89, "ratio_memory": 1.0},
     },
     # Test case 6: Expected to raise CPU ratio because max_replicas is reached
     {
@@ -447,7 +447,7 @@ test_data_hpa = [
             "pod_replica_history": 3,
             "pod_oom_history": 5,
         },
-        "expected_output": {"ratio_cpu": 1, "ratio_memory": 2},
+        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 2.0},
     },
     # Test case 7: Expected to raise CPU and memory ratio because almost max_replicas is reached and ooms werde found
     {
@@ -459,7 +459,7 @@ test_data_hpa = [
             "pod_replica_history": 3,
             "pod_oom_history": 5,
         },
-        "expected_output": {"ratio_cpu": 1, "ratio_memory": 2},
+        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 2.0},
     },
     # Test case 8: Expected to raise both CPU and memory ratio to match HPA even if history is 0
     {
@@ -542,14 +542,14 @@ test_data_cpu = [
     {
         "input_params": {
             "cpu_history": main.CPU_MIN + 1,
-            "cpu_ratio": 1,
+            "cpu_ratio": 1.0,
             "runtime": None,
         },
         "expected_output": main.CPU_MIN + 1,
     },
     # Test case 1: Below min cpu
     {
-        "input_params": {"cpu_history": 0.000001, "cpu_ratio": 1, "runtime": None},
+        "input_params": {"cpu_history": 0.000001, "cpu_ratio": 1.0, "runtime": None},
         "expected_output": main.CPU_MIN,
     },
     # Test case 2: Below min cpu
@@ -559,19 +559,19 @@ test_data_cpu = [
     },
     # Test case 3: Higher max cpu
     {
-        "input_params": {"cpu_history": 9999999999, "cpu_ratio": 1, "runtime": None},
+        "input_params": {"cpu_history": 9999999999, "cpu_ratio": 1.0, "runtime": None},
         "expected_output": main.CPU_MAX,
     },
     # Test case 4: Higher max cpu
     {
-        "input_params": {"cpu_history": 1, "cpu_ratio": 9999999999, "runtime": None},
+        "input_params": {"cpu_history": 1, "cpu_ratio": 9999999999.0, "runtime": None},
         "expected_output": main.CPU_MAX,
     },
     # Test case 5: nodejs
     {
         "input_params": {
             "cpu_history": 10,
-            "cpu_ratio": 9999999999,
+            "cpu_ratio": 9999999999.0,
             "runtime": "nodejs",
         },
         "expected_output": main.CPU_MAX_NODEJS,
@@ -615,7 +615,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": main.MEMORY_MIN + 1024,
-            "memory_ratio": 1,
+            "memory_ratio": 1.0,
             "runtime": None,
         },
         "expected_output": main.MEMORY_MIN + 1024,
@@ -624,7 +624,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": 0.000001,
-            "memory_ratio": 1,
+            "memory_ratio": 1.0,
             "runtime": None,
         },
         "expected_output": main.MEMORY_MIN,
@@ -642,7 +642,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": 999999999999999,
-            "memory_ratio": 1,
+            "memory_ratio": 1.0,
             "runtime": None,
         },
         "expected_output": main.MEMORY_MAX,
@@ -651,7 +651,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": 1,
-            "memory_ratio": 999999999999999,
+            "memory_ratio": 999999999999999.0,
             "runtime": None,
         },
         "expected_output": main.MEMORY_MAX,
@@ -660,7 +660,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": 10,
-            "memory_ratio": 999999999999999,
+            "memory_ratio": 999999999999999.0,
             "runtime": "nodejs",
         },
         "expected_output": main.MEMORY_MAX,
@@ -706,7 +706,7 @@ test_data_optimize_container = [
             "new_limits": {"cpu": 3, "memory": 1024**3 * 4},
         },
         "expected_output": {
-            "requests": {"cpu": "3000Mi", "memory": "2048Mi"},
+            "requests": {"cpu": "3000m", "memory": "2048Mi"},
             "limits": {"memory": "4096Mi"},
         },
     },
@@ -719,7 +719,7 @@ test_data_optimize_container = [
             "new_limits": {"cpu": 3, "memory": 1024**3 * 4},
         },
         "expected_output": {
-            "requests": {"cpu": "3000Mi", "memory": "2048Mi"},
+            "requests": {"cpu": "3000m", "memory": "2048Mi"},
             "limits": {"memory": "4096Mi"},
         },
     },
@@ -728,11 +728,11 @@ test_data_optimize_container = [
         "input_params": {
             "old_requests": {"cpu": "6", "memory": "1G"},
             "old_limits": {},
-            "new_requests": {"cpu": 1, "memory": 1024**3 * 2},
+            "new_requests": {"cpu": 1.0, "memory": 1024**3 * 2},
             "new_limits": {"memory": 1024**3 * 4},
         },
         "expected_output": {
-            "requests": {"cpu": "1000Mi", "memory": "2048Mi"},
+            "requests": {"cpu": "1000m", "memory": "2048Mi"},
             "limits": {"memory": "4096Mi"},
         },
     },
@@ -763,8 +763,8 @@ def test_optimize_container(mock_func1, mock_func2, mock_func3, test_case):
         "deployment1",
         container,
         "deployment",
-        1,
-        1,
+        1.0,
+        1.0,
         main.DEFAULT_LOOKBACK_MINUTES,
     )
 
