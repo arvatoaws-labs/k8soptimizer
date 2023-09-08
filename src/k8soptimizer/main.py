@@ -62,6 +62,7 @@ UPDATE_AGE_FILTER = int(os.getenv("UPDATE_AGE_FILTER", 60))
 
 DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 3600 * 24 * 7))
 DEFAULT_QUANTILE_OVER_TIME = float(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95))
+DRY_RUN = float(os.getenv("DRY_RUN", False))
 
 CPU_MIN = float(os.getenv("CPU_MIN", 0.001))
 CPU_MAX = float(os.getenv("CPU_MAX", 16))
@@ -1262,6 +1263,13 @@ def parse_args(args):
         action="store_const",
         const=logging.DEBUG,
     )
+    # Add the dry run option
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=DRY_RUN,
+        help="Perform a dry run without making any actual changes.",
+    )
     return parser.parse_args(args)
 
 
@@ -1302,7 +1310,7 @@ def main(args):
             namespace.metadata.name, DEPLOYMENT_FILTER
         ).items:
             try:
-                optimize_deployment(deployment)
+                optimize_deployment(deployment, args.dry_run)
             except Exception as e:
                 _logger.exception(
                     "An error occurred while optimizing the deployment: %s", str(e)
