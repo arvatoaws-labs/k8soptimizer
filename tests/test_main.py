@@ -558,31 +558,31 @@ test_data_cpu = [
     # Test case 0: Normal case
     {
         "input_params": {
-            "cpu_history": main.CPU_MIN + 1,
+            "cpu_history": main.MIN_CPU_REQUEST + 1,
             "cpu_ratio": 1.0,
             "runtime": None,
         },
-        "expected_output": main.CPU_MIN + 1,
+        "expected_output": main.MIN_CPU_REQUEST + 1,
     },
     # Test case 1: Below min cpu
     {
         "input_params": {"cpu_history": 0.000001, "cpu_ratio": 1.0, "runtime": None},
-        "expected_output": main.CPU_MIN,
+        "expected_output": main.MIN_CPU_REQUEST,
     },
     # Test case 2: Below min cpu
     {
         "input_params": {"cpu_history": 1, "cpu_ratio": 0.000001, "runtime": None},
-        "expected_output": main.CPU_MIN,
+        "expected_output": main.MIN_CPU_REQUEST,
     },
     # Test case 3: Higher max cpu
     {
         "input_params": {"cpu_history": 9999999999, "cpu_ratio": 1.0, "runtime": None},
-        "expected_output": main.CPU_MAX,
+        "expected_output": main.MAX_CPU_REQUEST,
     },
     # Test case 4: Higher max cpu
     {
         "input_params": {"cpu_history": 1, "cpu_ratio": 9999999999.0, "runtime": None},
-        "expected_output": main.CPU_MAX,
+        "expected_output": main.MAX_CPU_REQUEST,
     },
     # Test case 5: nodejs
     {
@@ -591,7 +591,7 @@ test_data_cpu = [
             "cpu_ratio": 9999999999.0,
             "runtime": "nodejs",
         },
-        "expected_output": main.CPU_MAX_NODEJS,
+        "expected_output": main.MAX_CPU_REQUEST_NODEJS,
     },
 ]
 
@@ -631,11 +631,11 @@ test_data_memory = [
     # Test case 0: Normal case
     {
         "input_params": {
-            "memory_history": main.MEMORY_MIN + 1024,
+            "memory_history": main.MIN_MEMORY_REQUEST + 1024,
             "memory_ratio": 1.0,
             "runtime": None,
         },
-        "expected_output": main.MEMORY_MIN + 1024,
+        "expected_output": main.MIN_MEMORY_REQUEST + 1024,
     },
     # Test case 1: Below min memory
     {
@@ -644,7 +644,7 @@ test_data_memory = [
             "memory_ratio": 1.0,
             "runtime": None,
         },
-        "expected_output": main.MEMORY_MIN,
+        "expected_output": main.MIN_MEMORY_REQUEST,
     },
     # Test case 2: Below min memory
     {
@@ -653,7 +653,7 @@ test_data_memory = [
             "memory_ratio": 000000.1,
             "runtime": None,
         },
-        "expected_output": main.MEMORY_MIN,
+        "expected_output": main.MIN_MEMORY_REQUEST,
     },
     # Test case 3: Higher max memory
     {
@@ -662,7 +662,7 @@ test_data_memory = [
             "memory_ratio": 1.0,
             "runtime": None,
         },
-        "expected_output": main.MEMORY_MAX,
+        "expected_output": main.MAX_MEMORY_REQUEST,
     },
     # Test case 4: Higher max memory
     {
@@ -671,7 +671,7 @@ test_data_memory = [
             "memory_ratio": 999999999999999.0,
             "runtime": None,
         },
-        "expected_output": main.MEMORY_MAX,
+        "expected_output": main.MAX_MEMORY_REQUEST,
     },
     # Test case 5: nodejs
     {
@@ -680,17 +680,17 @@ test_data_memory = [
             "memory_ratio": 999999999999999.0,
             "runtime": "nodejs",
         },
-        "expected_output": main.MEMORY_MAX,
+        "expected_output": main.MAX_MEMORY_REQUEST,
     },
     # Test case 6: OOM killed
     {
         "input_params": {
-            "memory_history": main.MEMORY_MIN + 1024,
+            "memory_history": main.MIN_MEMORY_REQUEST + 1024,
             "memory_ratio": 1.0,
             "runtime": None,
             "oom_killed": 11,
         },
-        "expected_output": (main.MEMORY_MIN + 1024) * 2,
+        "expected_output": (main.MIN_MEMORY_REQUEST + 1024) * 2,
     },
 ]
 

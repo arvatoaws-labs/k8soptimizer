@@ -1,3 +1,4 @@
+import argparse
 import re
 from datetime import datetime, timezone
 
@@ -135,3 +136,39 @@ def calculate_minutes_ago_from_timestamp(datetime_object: datetime) -> int:
     current_time = datetime.now(timezone.utc)
     time_difference = current_time - datetime_object
     return int(time_difference.total_seconds() / 60)
+
+
+@beartype
+def is_valid_regex(value: str) -> bool:
+    try:
+        re.compile(value)
+        return True
+    except re.error:
+        return False
+
+
+@beartype
+def valid_regex_arg(value: str) -> str:
+    if is_valid_regex(value):
+        return value
+    raise argparse.ArgumentTypeError(f"'{value}' is not a valid regular expression")
+
+
+@beartype
+def is_valid_k8s_name(name: str) -> bool:
+    # Check length
+    if len(name) > 253:
+        return False
+
+    # Check pattern
+    pattern = r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    if bool(re.match(pattern, name)):
+        return True
+    return False
+
+
+@beartype
+def valid_k8s_name_arg(name: str) -> str:
+    if is_valid_k8s_name(name):
+        return name
+    raise argparse.ArgumentTypeError(f"'{name}' is not a valid k8s object name")

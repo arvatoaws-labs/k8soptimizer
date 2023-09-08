@@ -52,28 +52,31 @@ _logger = logging.getLogger(__name__)
 
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090")
 
-NAMESPACE_FILTER = os.getenv("NAMESPACE_FILTER", ".*")
-DEPLOYMENT_FILTER = os.getenv("DEPLOYMENT_FILTER", ".*")
-CONTAINER_FILTER = os.getenv("CONTAINER_FILTER", ".*")
+NAMESPACE_PATTERN = os.getenv("NAMESPACE_PATTERN", ".*")
+DEPLOYMENT_PATTERN = os.getenv("DEPLOYMENT_PATTERN", ".*")
+CONTAINER_PATTERN = os.getenv("CONTAINER_PATTERN", ".*")
 
 # in minutes
-CREATE_AGE_FILTER = int(os.getenv("CREATE_AGE_FILTER", 60))
-UPDATE_AGE_FILTER = int(os.getenv("UPDATE_AGE_FILTER", 60))
-
+CREATE_AGE_THRESHOLD = int(os.getenv("CREATE_AGE_THRESHOLD", 60))
+UPDATE_AGE_THRESHOLD = int(os.getenv("UPDATE_AGE_THRESHOLD", 60))
+MIN_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 5))
+MAX_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 3600 * 24 * 30))
 DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 3600 * 24 * 7))
 DEFAULT_QUANTILE_OVER_TIME = float(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95))
-DRY_RUN = float(os.getenv("DRY_RUN", False))
 
-CPU_MIN = float(os.getenv("CPU_MIN", 0.001))
-CPU_MAX = float(os.getenv("CPU_MAX", 16))
-CPU_MAX_NODEJS = 1.0
-MEMORY_MIN = int(os.getenv("MEMORY_MIN", 1024**2 * 16))
-MEMORY_MAX = int(os.getenv("MEMORY_MAX", 1024**3 * 16))
-MEMORY_LIMIT_MIN = int(os.getenv("MEMORY_LIMIT_MIN", 1024**2 * 128))
-MEMORY_LIMIT_MAX = int(os.getenv("MEMORY_LIMIT_MAX", 1024**3 * 32))
+# operating mode
+DRY_RUN_MODE = float(os.getenv("DRY_RUN_MODE", False))
+
+MIN_CPU_REQUEST = float(os.getenv("MIN_CPU_REQUEST", 0.001))
+MAX_CPU_REQUEST = float(os.getenv("MAX_CPU_REQUEST", 16))
+MAX_CPU_REQUEST_NODEJS = 1.0
+MIN_MEMORY_REQUEST = int(os.getenv("MIN_MEMORY_REQUEST", 1024**2 * 16))
+MAX_MEMORY_REQUEST = int(os.getenv("MAX_MEMORY_REQUEST", 1024**3 * 16))
+MIN_MEMORY_LIMIT = int(os.getenv("MIN_MEMORY_LIMIT", 1024**2 * 128))
+MAX_MEMORY_LIMIT = int(os.getenv("MAX_MEMORY_LIMIT", 1024**3 * 32))
 MEMORY_LIMIT_RATIO = int(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
 
-CHANGE_MIN = os.getenv("CHANGE_MIN", 0.1)
+CHANGE_THRESHOLD = os.getenv("CHANGE_THRESHOLD", 0.1)
 
 stats = {}
 stats["old_cpu_sum"] = 0
@@ -484,9 +487,9 @@ def calculate_cpu_requests(
     """
     new_cpu = round(
         max(
-            CPU_MIN,
+            MIN_CPU_REQUEST,
             min(
-                CPU_MAX,
+                MAX_CPU_REQUEST,
                 get_cpu_cores_usage_history(
                     namespace_name,
                     workload,
@@ -503,7 +506,7 @@ def calculate_cpu_requests(
         namespace_name, workload, container_name, workload_type
     )
     if runtime == "nodejs":
-        new_cpu = min(CPU_MAX_NODEJS, new_cpu)
+        new_cpu = min(MAX_CPU_REQUEST_NODEJS, new_cpu)
 
     return float(new_cpu)
 
@@ -544,9 +547,9 @@ def calculate_memory_requests(
 
     new_memory = round(
         max(
-            MEMORY_MIN,
+            MIN_MEMORY_REQUEST,
             min(
-                MEMORY_MAX,
+                MAX_MEMORY_REQUEST,
                 get_memory_bytes_usage_history(
                     namespace_name,
                     workload,
@@ -586,19 +589,19 @@ def calculate_memory_limits(
         memory_limits = calculate_memory_limits("my-namespace", "my-workload", "deployment", "my-container", 2048)
     """
     new_memory_limit = max(
-        MEMORY_LIMIT_MIN,
-        min(MEMORY_LIMIT_MAX, memory_requests * MEMORY_LIMIT_RATIO),
+        MIN_MEMORY_LIMIT,
+        min(MAX_MEMORY_LIMIT, memory_requests * MEMORY_LIMIT_RATIO),
     )
     return int(new_memory_limit)
 
 
 @beartype
-def get_namespaces(namespace_filter: str = ".*") -> V1NamespaceList:
+def get_namespaces(namespace_pattern: str = ".*") -> V1NamespaceList:
     """
-    Get a list of Kubernetes namespaces that match the specified filter.
+    Get a list of Kubernetes namespaces that match the specified pattern.
 
     Args:
-        namespace_filter (str, optional): A regular expression pattern to filter namespaces. Default is ".*".
+        namespace_pattern (str, optional): A regular expression pattern to filter namespaces. Default is ".*".
 
     Returns:
         V1NamespaceList: A list of namespaces.
@@ -614,10 +617,10 @@ def get_namespaces(namespace_filter: str = ".*") -> V1NamespaceList:
         _logger.debug(namespace)
         namespace_name = namespace.metadata.name
 
-        x = re.search(namespace_filter, namespace_name)
+        x = re.search(namespace_pattern, namespace_name)
         if x is None:
             _logger.debug(
-                "Skipping namespace due to NAMESPACE_FILTER: %s" % namespace_name
+                "Skipping namespace due to NAMESPACE_PATTERN: %s" % namespace_name
             )
             continue
 
@@ -628,14 +631,14 @@ def get_namespaces(namespace_filter: str = ".*") -> V1NamespaceList:
 
 @beartype
 def get_deployments(
-    namespace_name: str, deployment_filter: str = ".*", only_running: bool = True
+    namespace_name: str, deplopyment_pattern: str = ".*", only_running: bool = True
 ) -> V1DeploymentList:
     """
-    Get a list of Kubernetes deployments in a specific namespace that match the specified filter.
+    Get a list of Kubernetes deployments in a specific namespace that match the specified pattern.
 
     Args:
         namespace_name (str): The name of the Kubernetes namespace.
-        deployment_filter (str, optional): A regular expression pattern to filter deployments. Default is ".*".
+        deplopyment_pattern (str, optional): A regular expression pattern to filter deployments. Default is ".*".
         only_running (bool, optional): Flag to include only running deployments. Default is True.
 
     Returns:
@@ -651,10 +654,10 @@ def get_deployments(
         _logger.debug(deployment)
         deployment_name = deployment.metadata.name
 
-        x = re.search(deployment_filter, deployment_name)
+        x = re.search(deplopyment_pattern, deployment_name)
         if x is None:
             _logger.debug(
-                "Skipping deployment due to DEPLOYMENT_FILTER: %s" % deployment_name
+                "Skipping deployment due to DEPLOYMENT_PATTERN: %s" % deployment_name
             )
             continue
 
@@ -799,7 +802,7 @@ def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int
     creation_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
         deployment.metadata.creation_timestamp
     )
-    if creation_minutes_ago < CREATE_AGE_FILTER:
+    if creation_minutes_ago < CREATE_AGE_THRESHOLD:
         raise RuntimeError(
             "Deployment is too young, created {} minutes ago".format(
                 creation_minutes_ago
@@ -812,19 +815,26 @@ def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int
         update_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
             deployment.metadata.creation_timestamp
         )
-        if update_minutes_ago < UPDATE_AGE_FILTER:
+        if update_minutes_ago < UPDATE_AGE_THRESHOLD:
             raise RuntimeError(
                 "Deployment was modified too recent, updated {} minutes ago".format(
                     creation_minutes_ago
                 )
             )
-        lookback_minutes = min(lookback_minutes, update_minutes_ago)
+        lookback_minutes = min(lookback_minutes, (update_minutes_ago - 5))
+
+    if lookback_minutes < MIN_LOOKBACK_MINUTES:
+        raise RuntimeError("Lookback minutes is too low: {}".format(lookback_minutes))
+
+    min(MAX_LOOKBACK_MINUTES, lookback_minutes)
 
     return lookback_minutes
 
 
 @beartype
-def optimize_deployment(deployment: V1Deployment, dry_run=True) -> V1Deployment:
+def optimize_deployment(
+    deployment: V1Deployment, container_pattern=CONTAINER_PATTERN, dry_run=True
+) -> V1Deployment:
     """
     Optimize the resources (CPU and memory) for containers in a deployment.
 
@@ -853,6 +863,14 @@ def optimize_deployment(deployment: V1Deployment, dry_run=True) -> V1Deployment:
     _logger.info("Target ratio cpu: %s" % target_ratio["cpu"])
     _logger.info("Target ratio memory: %s" % target_ratio["memory"])
     for i, container in enumerate(deployment.spec.template.spec.containers):
+        container_name = container.name
+        x = re.search(container_pattern, container_name)
+        if x is None:
+            _logger.debug(
+                "Skipping container due to CONTAINER_PATTERN: %s" % container_name
+            )
+            continue
+
         container_new = optimize_container(
             namespace_name,
             deployment_name,
@@ -1088,7 +1106,7 @@ def optimize_container_cpu_requests(
 
     diff_cpu = round(((new_cpu / old_cpu) - 1) * 100)
 
-    if abs(diff_cpu) < CHANGE_MIN * 100:
+    if abs(diff_cpu) < CHANGE_THRESHOLD * 100:
         _logger.info("CPU requests change is too small: {}%".format(diff_cpu))
         new_cpu = old_cpu
     else:
@@ -1153,7 +1171,7 @@ def optimize_container_memory_requests(
     )
     diff_memory = round(((new_memory / old_memory) - 1) * 100)
 
-    if abs(diff_memory) < CHANGE_MIN * 100:
+    if abs(diff_memory) < CHANGE_THRESHOLD * 100:
         _logger.info("Memory request change is too small: {}%".format(diff_memory))
         new_memory = old_memory
     else:
@@ -1173,7 +1191,7 @@ def optimize_container_memory_limits(
     workload: str,
     container: V1Container,
     workload_type: str = "deployment",
-    new_memory: int = MEMORY_MIN,
+    new_memory: int = MIN_MEMORY_REQUEST,
 ) -> int:
     """
     Optimize memory limits for a Kubernetes container.
@@ -1183,7 +1201,7 @@ def optimize_container_memory_limits(
         workload (str): The name of the workload.
         container (V1Container): The Kubernetes container object.
         workload_type (str, optional): The type of workload. Defaults to "deployment".
-        new_memory (int, optional): The new memory request in bytes. Defaults to MEMORY_MIN.
+        new_memory (int, optional): The new memory request in bytes. Defaults to MIN_MEMORY_REQUEST.
 
     Returns:
         int: The new memory limit in bytes.
@@ -1209,7 +1227,7 @@ def optimize_container_memory_limits(
     )
     diff_memory_limit = round(((new_memory_limit / old_memory_limit) - 1) * 100)
 
-    if abs(diff_memory_limit) < CHANGE_MIN * 100:
+    if abs(diff_memory_limit) < CHANGE_THRESHOLD * 100:
         _logger.info("Memory limit change is too small: {}%".format(diff_memory_limit))
         new_memory_limit = old_memory_limit
     else:
@@ -1263,13 +1281,68 @@ def parse_args(args):
         action="store_const",
         const=logging.DEBUG,
     )
-    # Add the dry run option
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        default=DRY_RUN,
+        default=DRY_RUN_MODE,
         help="Perform a dry run without making any actual changes.",
+        dest="dry_run",
     )
+
+    group_ns = parser.add_mutually_exclusive_group()
+    group_ns.add_argument(
+        "-n",
+        "--namespace",
+        action="store",
+        help="Set namespace",
+        dest="namespace",
+        type=helpers.valid_k8s_name_arg,
+    )
+    group_ns.add_argument(
+        "--namespace-pattern",
+        action="store",
+        default=NAMESPACE_PATTERN,
+        help="Set namespace pattern (regex)",
+        dest="namespace_pattern",
+        type=helpers.valid_regex_arg,
+    )
+
+    group_ds = parser.add_mutually_exclusive_group()
+    group_ds.add_argument(
+        "-d",
+        "--deployment",
+        action="store",
+        help="Set deployment",
+        dest="deployment",
+        type=helpers.valid_k8s_name_arg,
+    )
+    parser.add_argument(
+        "--deployment-pattern",
+        action="store",
+        default=DEPLOYMENT_PATTERN,
+        help="Set deployment pattern (regex)",
+        dest="deplopyment_pattern",
+        type=helpers.valid_regex_arg,
+    )
+
+    group_cs = parser.add_mutually_exclusive_group()
+    group_cs.add_argument(
+        "-c",
+        "--container",
+        action="store",
+        help="Set container",
+        dest="container",
+        type=helpers.is_valid_k8s_name,
+    )
+    group_cs.add_argument(
+        "--container-pattern",
+        action="store",
+        default=DEPLOYMENT_PATTERN,
+        help="Set container pattern (regex)",
+        dest="container_pattern",
+        type=helpers.valid_regex_arg,
+    )
+
     return parser.parse_args(args)
 
 
@@ -1302,15 +1375,25 @@ def main(args):
     verify_kubernetes_connection()
     verify_prometheus_connection()
 
-    _logger.debug("Listing k8s namespaces")
-    for namespace in get_namespaces(NAMESPACE_FILTER).items:
-        _logger.debug("Processing namespace: %s" % namespace.metadata.name)
-        _logger.debug("Listing k8s deployments")
+    namespace_pattern = args.namespace_pattern
+    if args.namespace is not None:
+        namespace_pattern = "^{}$".format(args.namespace)
+    deplopyment_pattern = args.deplopyment_pattern
+    if args.deployment is not None:
+        deplopyment_pattern = "^{}$".format(args.deployment)
+    container_pattern = args.container_pattern
+    if args.container is not None:
+        container_pattern = "^{}$".format(args.container)
+    _logger.info("Using namespace_pattern: {}".format(namespace_pattern))
+    _logger.info("Using deplopyment_pattern: {}".format(deplopyment_pattern))
+    _logger.info("Using container_pattern: {}".format(container_pattern))
+
+    for namespace in get_namespaces(namespace_pattern).items:
         for deployment in get_deployments(
-            namespace.metadata.name, DEPLOYMENT_FILTER
+            namespace.metadata.name, deplopyment_pattern
         ).items:
             try:
-                optimize_deployment(deployment, args.dry_run)
+                optimize_deployment(deployment, container_pattern, args.dry_run)
             except Exception as e:
                 _logger.exception(
                     "An error occurred while optimizing the deployment: %s", str(e)
