@@ -1,3 +1,4 @@
+import argparse
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -63,3 +64,28 @@ def test_calculate_minutes_ago():
 
 def test_create_timestamp_str():
     assert helpers.calculate_minutes_ago_from_timestamp(helpers.create_timestamp()) == 0
+
+
+def test_is_valid_regex():
+    assert helpers.is_valid_regex("(") is False
+    assert helpers.is_valid_regex("^test$") is True
+
+
+def test_valid_regex_arg():
+    with pytest.raises(argparse.ArgumentTypeError) as exc_info:
+        helpers.valid_regex_arg("(")
+    assert str(exc_info.value).rfind("is not a valid regular expression") > 0
+    assert helpers.valid_regex_arg("^test$") == "^test$"
+
+
+def test_is_valid_k8s_name():
+    assert helpers.is_valid_k8s_name("teststring" * 300) is False
+    assert helpers.is_valid_k8s_name("(") is False
+    assert helpers.is_valid_k8s_name("hallo") is True
+
+
+def test_valid_k8s_name_arg():
+    with pytest.raises(argparse.ArgumentTypeError) as exc_info:
+        helpers.valid_k8s_name_arg("(")
+    assert str(exc_info.value).rfind("is not a valid k8s object name") > 0
+    assert helpers.valid_k8s_name_arg("hallo") == "hallo"

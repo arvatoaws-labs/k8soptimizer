@@ -803,7 +803,7 @@ def test_optimize_container(mock_func1, mock_func2, mock_func3, test_case):
     assert container.resources.limits == expected_output["limits"]
 
 
-def test_resources_from_deployment():
+def test_get_resources_from_deployment():
     # Define a list of V1Namespace objects
     deployment1 = V1Deployment(
         metadata=V1ObjectMeta(
@@ -854,10 +854,10 @@ def test_resources_from_deployment():
 
 
 @patch("k8soptimizer.main.client.AppsV1Api.patch_namespaced_deployment")
+@patch("k8soptimizer.main.calculate_lookback_minutes_from_deployment")
 @patch("k8soptimizer.main.calculate_hpa_target_ratio")
 @patch("k8soptimizer.main.optimize_container")
-def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
-    # Define a list of V1Namespace objects
+def test_optimize_deployment(mock_func1, mock_func2, mock_func3, mock_func4):
     deployment1_input = V1Deployment(
         metadata=V1ObjectMeta(
             name="deployment1",
@@ -890,7 +890,6 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
         ),
     )
 
-    # Define a list of V1Namespace objects
     deployment1_output = V1Deployment(
         metadata=V1ObjectMeta(
             name="deployment1",
@@ -926,7 +925,8 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3):
 
     mock_func1.return_value = deployment1_output
     mock_func2.return_value = {"cpu": 2, "memory": 2}
-    mock_func3.return_value = True
+    mock_func3.return_value = 60
+    mock_func4.return_value = True
 
     result = main.optimize_deployment(deployment1_input)
 

@@ -58,9 +58,11 @@ CONTAINER_PATTERN = os.getenv("CONTAINER_PATTERN", ".*")
 
 # in minutes
 CREATE_AGE_THRESHOLD = int(os.getenv("CREATE_AGE_THRESHOLD", 60))
+# cannot not be less than 5 minutes)
 UPDATE_AGE_THRESHOLD = int(os.getenv("UPDATE_AGE_THRESHOLD", 60))
 MIN_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 5))
 MAX_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 3600 * 24 * 30))
+OFFSET_LOOKBACK_MINUTES = int(os.getenv("OFFSET_LOOKBACK_MINUTES", 5))
 DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 3600 * 24 * 7))
 DEFAULT_QUANTILE_OVER_TIME = float(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95))
 
@@ -184,6 +186,45 @@ def get_max_cpu_cores_per_runtime(runtime: str) -> int:
     return 100
 
 
+@beartype
+def get_number_of_samples_from_history(
+    namespace: str,
+    workload: str,
+    workload_type: str = "deployment",
+    lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
+) -> float:
+    """
+    Get the CPU cores usage history for a specific container.
+
+    Args:
+        namespace (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., deployment).
+        workload_type (str, optional): The type of workload. Default is "deployment".
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+
+    Returns:
+        float: The number of samples from prometheus.
+
+    Raises:
+        RuntimeError: If no data is found for the Prometheus query.
+
+    Example:
+        samples = get_number_of_samples_from_history("my-namespace", "my-deployment")
+    """
+    query = 'max by (namespace,workload,workload_type) (count_over_time(kube_workload_container_resource_usage_cpu_cores_avg{{namespace="{namespace}", workload="{workload}", workload_type="{workload_type}"}}[{lookback_minutes}m]))'.format(
+        namespace=namespace,
+        workload=workload,
+        workload_type=workload_type,
+        lookback_minutes=lookback_minutes,
+    )
+    j = query_prometheus(query)
+
+    if j["data"]["result"] == []:
+        raise RuntimeError("No data found for prometheus query: {}".format(query))
+    return float(j["data"]["result"][0]["value"][1])
+
+
+# FIXME make avg
 @beartype
 def get_max_pods_per_deployment_history(
     namespace_name: str,
@@ -781,7 +822,7 @@ def get_resources_from_deployment(deployment: V1Deployment) -> dict:
 
 
 @beartype
-def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int:
+def calculate_lookback_minutes_from_deployment(deployment: V1Deployment) -> int:
     """
     Calculate the lookback minutes based on a deployment's creation and last update timestamps.
 
@@ -796,7 +837,7 @@ def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int
 
     Example:
         deployment = get_deployment_by_name("my-namespace", "my-deployment")
-        lookback = calculate_loookback_minutes_from_deployment(deployment)
+        lookback = calculate_lookback_minutes_from_deployment(deployment)
     """
     lookback_minutes = DEFAULT_LOOKBACK_MINUTES
     creation_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
@@ -804,9 +845,7 @@ def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int
     )
     if creation_minutes_ago < CREATE_AGE_THRESHOLD:
         raise RuntimeError(
-            "Deployment is too young, created {} minutes ago".format(
-                creation_minutes_ago
-            )
+            f"The deployment is too young. It was created {creation_minutes_ago} minutes ago, which is below the minimum threshold of {CREATE_AGE_THRESHOLD} minutes."
         )
 
     lookback_minutes = creation_minutes_ago
@@ -817,16 +856,30 @@ def calculate_loookback_minutes_from_deployment(deployment: V1Deployment) -> int
         )
         if update_minutes_ago < UPDATE_AGE_THRESHOLD:
             raise RuntimeError(
-                "Deployment was modified too recent, updated {} minutes ago".format(
-                    creation_minutes_ago
-                )
+                f"The deployment was modified too recently. It was updated {update_minutes_ago} minutes ago, which is below the minimum threshold of {UPDATE_AGE_THRESHOLD} minutes since creation."
             )
-        lookback_minutes = min(lookback_minutes, (update_minutes_ago - 5))
+        lookback_minutes = min(
+            lookback_minutes, (update_minutes_ago - OFFSET_LOOKBACK_MINUTES)
+        )
 
     if lookback_minutes < MIN_LOOKBACK_MINUTES:
-        raise RuntimeError("Lookback minutes is too low: {}".format(lookback_minutes))
+        raise RuntimeError(
+            f"The specified lookback period ({lookback_minutes} minutes) is below the minimum required ({MIN_LOOKBACK_MINUTES} minutes). Please provide a longer lookback period to ensure sufficient historical data is available."
+        )
 
-    min(MAX_LOOKBACK_MINUTES, lookback_minutes)
+    history_samples = get_number_of_samples_from_history(
+        deployment.metadata.namespace,
+        deployment.metadata.name,
+        "deployment",
+        lookback_minutes,
+    )
+
+    if history_samples < MIN_LOOKBACK_MINUTES:
+        raise RuntimeError(
+            f"The provided history samples ({history_samples}) are below the minimum required ({MIN_LOOKBACK_MINUTES}). Please ensure an adequate amount of historical data is available."
+        )
+
+    lookback_minutes = min(MAX_LOOKBACK_MINUTES, lookback_minutes, history_samples)
 
     return lookback_minutes
 
@@ -856,7 +909,7 @@ def optimize_deployment(
     _logger.info("Optimizing deployment: %s" % deployment_name)
 
     old_resources = get_resources_from_deployment(deployment)
-    lookback_minutes = calculate_loookback_minutes_from_deployment(deployment)
+    lookback_minutes = calculate_lookback_minutes_from_deployment(deployment)
     target_ratio = calculate_hpa_target_ratio(
         namespace_name, deployment_name, lookback_minutes
     )
