@@ -26,10 +26,10 @@ import logging
 import os
 import re
 import sys
-from typing import Optional
 
 import requests
 from beartype import beartype
+from beartype.typing import Optional, Tuple
 from kubernetes import client, config
 from kubernetes.client.models import (
     V1Container,
@@ -60,7 +60,7 @@ CONTAINER_PATTERN = os.getenv("CONTAINER_PATTERN", ".*")
 CREATE_AGE_THRESHOLD = int(os.getenv("CREATE_AGE_THRESHOLD", 60))
 # cannot not be less than 5 minutes)
 UPDATE_AGE_THRESHOLD = int(os.getenv("UPDATE_AGE_THRESHOLD", 60))
-MIN_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 5))
+MIN_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 30))
 MAX_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 3600 * 24 * 30))
 OFFSET_LOOKBACK_MINUTES = int(os.getenv("OFFSET_LOOKBACK_MINUTES", 5))
 DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 3600 * 24 * 7))
@@ -76,10 +76,13 @@ MAX_CPU_REQUEST = float(os.getenv("MAX_CPU_REQUEST", 16))
 MAX_CPU_REQUEST_NODEJS = 1.0
 MIN_MEMORY_REQUEST = int(os.getenv("MIN_MEMORY_REQUEST", 1024**2 * 16))
 MAX_MEMORY_REQUEST = int(os.getenv("MAX_MEMORY_REQUEST", 1024**3 * 16))
-MIN_MEMORY_LIMIT = int(os.getenv("MIN_MEMORY_LIMIT", 1024**2 * 128))
-MAX_MEMORY_LIMIT = int(os.getenv("MAX_MEMORY_LIMIT", 1024**3 * 32))
-MEMORY_LIMIT_RATIO = int(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
-
+MEMORY_LIMIT_RATIO = float(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
+MIN_MEMORY_LIMIT = int(
+    os.getenv("MIN_MEMORY_LIMIT", MIN_MEMORY_REQUEST * MEMORY_LIMIT_RATIO)
+)
+MAX_MEMORY_LIMIT = int(
+    os.getenv("MAX_MEMORY_LIMIT", MAX_MEMORY_REQUEST * MEMORY_LIMIT_RATIO)
+)
 CHANGE_THRESHOLD = os.getenv("CHANGE_THRESHOLD", 0.1)
 
 stats = {}
@@ -635,7 +638,8 @@ def calculate_memory_limits(
         MIN_MEMORY_LIMIT,
         min(MAX_MEMORY_LIMIT, memory_requests * MEMORY_LIMIT_RATIO),
     )
-    return int(new_memory_limit)
+    # new_memory_limit = memory_requests * MEMORY_LIMIT_RATIO
+    return round(new_memory_limit)
 
 
 @beartype
@@ -948,6 +952,7 @@ def optimize_deployment(
     )
     _logger.info("Target ratio cpu: %s" % target_ratio["cpu"])
     _logger.info("Target ratio memory: %s" % target_ratio["memory"])
+    changed = False
     for i, container in enumerate(deployment.spec.template.spec.containers):
         container_name = container.name
         x = re.search(container_pattern, container_name)
@@ -957,7 +962,7 @@ def optimize_deployment(
             )
             continue
 
-        container_new = optimize_container(
+        container_new, changed_container = optimize_container(
             namespace_name,
             deployment_name,
             container,
@@ -967,30 +972,35 @@ def optimize_deployment(
             lookback_minutes,
             deployment.spec.replicas,
         )
+        if changed_container:
+            changed = True
         deployment.spec.template.spec.containers[i] = container_new
 
-    deployment.metadata.annotations[
-        "k8soptimizer.{}/old-resources".format(__domain__)
-    ] = json.dumps(old_resources)
-    deployment.metadata.annotations[
-        "k8soptimizer.{}/last-update".format(__domain__)
-    ] = helpers.create_timestamp()
+    if changed:
+        deployment.metadata.annotations[
+            "k8soptimizer.{}/old-resources".format(__domain__)
+        ] = json.dumps(old_resources)
+        deployment.metadata.annotations[
+            "k8soptimizer.{}/last-update".format(__domain__)
+        ] = helpers.create_timestamp()
 
-    # Apply the changes
-    if dry_run is True:
-        _logger.info("Updating (dry-run) deployment: %s" % deployment_name)
-        apis_api.patch_namespaced_deployment(
-            deployment_name,
-            namespace_name,
-            deployment,
-            pretty=True,
-            dry_run="All",
-        )
+        # Apply the changes
+        if dry_run is True:
+            _logger.info("Updating (dry-run) deployment: %s" % deployment_name)
+            apis_api.patch_namespaced_deployment(
+                deployment_name,
+                namespace_name,
+                deployment,
+                pretty=True,
+                dry_run="All",
+            )
+        else:
+            _logger.info("Updating deployment: %s" % deployment_name)
+            apis_api.patch_namespaced_deployment(
+                deployment_name, namespace_name, deployment, pretty=True
+            )
     else:
-        _logger.info("Updating deployment: %s" % deployment_name)
-        apis_api.patch_namespaced_deployment(
-            deployment_name, namespace_name, deployment, pretty=True
-        )
+        _logger.info("Nothing changed deployment: %s" % deployment_name)
     return deployment
 
 
@@ -1004,7 +1014,7 @@ def optimize_container(
     target_ratio_memory: float = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     current_replicas: int = 1,
-) -> V1Container:
+) -> Tuple[V1Container, bool]:
     """
     Optimize resources (CPU and memory) for a container.
 
@@ -1020,6 +1030,7 @@ def optimize_container(
 
     Returns:
         V1Container: The optimized Kubernetes container object.
+        changed (bool): True if the container was changed, False otherwise.
 
     Example:
         namespace = "my-namespace"
@@ -1032,7 +1043,7 @@ def optimize_container(
     _logger.info("Processing container: %s" % container_name)
 
     old_cpu = get_cpu_requests_from_container(container)
-    new_cpu = optimize_container_cpu_requests(
+    new_cpu, changed_cpu = optimize_container_cpu_requests(
         namespace_name,
         workload,
         container,
@@ -1041,7 +1052,7 @@ def optimize_container(
         lookback_minutes,
     )
     old_memory = get_memory_requests_from_container(container)
-    new_memory = optimize_container_memory_requests(
+    new_memory, changed_memory = optimize_container_memory_requests(
         namespace_name,
         workload,
         container,
@@ -1049,7 +1060,7 @@ def optimize_container(
         target_ratio_memory,
         lookback_minutes,
     )
-    new_memory_limit = optimize_container_memory_limits(
+    new_memory_limit, changed_memory_limit = optimize_container_memory_limits(
         namespace_name, workload, container, workload_type, new_memory
     )
 
@@ -1061,12 +1072,17 @@ def optimize_container(
     container.resources.requests["cpu"] = str(round(new_cpu * 1000)) + "m"
     if "cpu" in container.resources.limits:
         del container.resources.limits["cpu"]
+        changed_cpu_limit = True
+    else:
+        changed_cpu_limit = False
     container.resources.requests["memory"] = str(round(new_memory / 1024 / 1024)) + "Mi"
     container.resources.limits["memory"] = (
         str(round(new_memory_limit / 1024 / 1024)) + "Mi"
     )
 
-    return container
+    return container, any(
+        [changed_cpu, changed_cpu_limit, changed_memory, changed_memory_limit]
+    )
 
 
 @beartype
@@ -1149,7 +1165,7 @@ def optimize_container_cpu_requests(
     workload_type: str = "deployment",
     target_ratio: float = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-) -> float:
+) -> Tuple[float, bool]:
     """
     Optimize CPU requests for a Kubernetes container.
 
@@ -1163,6 +1179,7 @@ def optimize_container_cpu_requests(
 
     Returns:
         float: The new CPU request in cores.
+        bool: If something was changed
 
     Example:
         namespace_name = "my-namespace"
@@ -1191,8 +1208,9 @@ def optimize_container_cpu_requests(
     )
 
     diff_cpu = round(((new_cpu / old_cpu) - 1) * 100)
+    change_too_small = abs(diff_cpu) < CHANGE_THRESHOLD * 100
 
-    if abs(diff_cpu) < CHANGE_THRESHOLD * 100:
+    if change_too_small:
         _logger.info("CPU requests change is too small: {}%".format(diff_cpu))
         new_cpu = old_cpu
     else:
@@ -1204,7 +1222,7 @@ def optimize_container_cpu_requests(
             )
         )
 
-    return float(new_cpu)
+    return float(new_cpu), not change_too_small
 
 
 @beartype
@@ -1215,7 +1233,7 @@ def optimize_container_memory_requests(
     workload_type: str = "deployment",
     target_ratio: float = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-) -> int:
+) -> Tuple[int, bool]:
     """
     Optimize memory requests for a Kubernetes container.
 
@@ -1229,6 +1247,7 @@ def optimize_container_memory_requests(
 
     Returns:
         int: The new memory request in bytes.
+        bool: If something was changed
 
     Example:
         namespace_name = "my-namespace"
@@ -1256,8 +1275,9 @@ def optimize_container_memory_requests(
         lookback_minutes,
     )
     diff_memory = round(((new_memory / old_memory) - 1) * 100)
+    change_too_small = abs(diff_memory) < CHANGE_THRESHOLD * 100
 
-    if abs(diff_memory) < CHANGE_THRESHOLD * 100:
+    if change_too_small:
         _logger.info("Memory request change is too small: {}%".format(diff_memory))
         new_memory = old_memory
     else:
@@ -1268,7 +1288,7 @@ def optimize_container_memory_requests(
                 diff_memory,
             )
         )
-    return int(new_memory)
+    return int(new_memory), not change_too_small
 
 
 @beartype
@@ -1278,7 +1298,7 @@ def optimize_container_memory_limits(
     container: V1Container,
     workload_type: str = "deployment",
     new_memory: int = MIN_MEMORY_REQUEST,
-) -> int:
+) -> Tuple[int, bool]:
     """
     Optimize memory limits for a Kubernetes container.
 
@@ -1291,6 +1311,7 @@ def optimize_container_memory_limits(
 
     Returns:
         int: The new memory limit in bytes.
+        bool: If something was changed
 
     Example:
         namespace_name = "my-namespace"
@@ -1313,7 +1334,9 @@ def optimize_container_memory_limits(
     )
     diff_memory_limit = round(((new_memory_limit / old_memory_limit) - 1) * 100)
 
-    if abs(diff_memory_limit) < CHANGE_THRESHOLD * 100:
+    change_too_small = abs(diff_memory_limit) < CHANGE_THRESHOLD * 100
+
+    if change_too_small:
         _logger.info("Memory limit change is too small: {}%".format(diff_memory_limit))
         new_memory_limit = old_memory_limit
     else:
@@ -1325,7 +1348,7 @@ def optimize_container_memory_limits(
             )
         )
 
-    return int(new_memory_limit)
+    return int(new_memory_limit), change_too_small
 
 
 def print_stats():

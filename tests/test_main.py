@@ -789,7 +789,7 @@ def test_optimize_container(mock_func1, mock_func2, mock_func3, test_case):
         ),
     )
 
-    container = main.optimize_container(
+    container, changed = main.optimize_container(
         "default",
         "deployment1",
         container,
@@ -801,6 +801,7 @@ def test_optimize_container(mock_func1, mock_func2, mock_func3, test_case):
 
     assert container.resources.requests == expected_output["requests"]
     assert container.resources.limits == expected_output["limits"]
+    assert changed
 
 
 def test_get_resources_from_deployment():
@@ -923,7 +924,7 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3, mock_func4):
         ),
     )
 
-    mock_func1.return_value = deployment1_output
+    mock_func1.return_value = deployment1_output, True
     mock_func2.return_value = {"cpu": 2, "memory": 2}
     mock_func3.return_value = 60
     mock_func4.return_value = True
@@ -1206,3 +1207,33 @@ def test_calculate_lookback_minutes_from_deployment(mock_func1):
     main.calculate_lookback_minutes_from_deployment(
         deployment3
     ) == main.MAX_LOOKBACK_MINUTES
+
+
+test_data_optimize_container = [
+    # Test case 0: Normal case
+    {
+        "request": main.MIN_MEMORY_REQUEST + 1,
+        "limit": round((main.MIN_MEMORY_REQUEST + 1) * main.MEMORY_LIMIT_RATIO),
+    },
+    # Test case 1: Too low values
+    {"request": 1024**2 * 1, "limit": main.MIN_MEMORY_LIMIT},
+    # Test case 2: Too high values
+    {"request": 1024**3 * 999999, "limit": main.MAX_MEMORY_LIMIT},
+    # Test case 3: Too high values
+    {"request": main.MAX_MEMORY_LIMIT + 1024, "limit": main.MAX_MEMORY_LIMIT},
+]
+
+
+@pytest.mark.parametrize("test_case", test_data_optimize_container)
+def test_calculate_memory_limits(test_case):
+    # Define your test data and expected response
+    namespace_name = "test_namespace"
+    deployment_name = "test_deployment"
+
+    # Call the function under test
+    result = main.calculate_memory_limits(
+        namespace_name, deployment_name, "development", "nginx", test_case["request"]
+    )
+
+    # Verify that the function behaves as expected
+    assert result == test_case["limit"]
