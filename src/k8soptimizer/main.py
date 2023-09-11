@@ -192,7 +192,7 @@ def get_number_of_samples_from_history(
     workload: str,
     workload_type: str = "deployment",
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
-) -> float:
+) -> int:
     """
     Get the CPU cores usage history for a specific container.
 
@@ -221,7 +221,7 @@ def get_number_of_samples_from_history(
 
     if j["data"]["result"] == []:
         raise RuntimeError("No data found for prometheus query: {}".format(query))
-    return float(j["data"]["result"][0]["value"][1])
+    return int(j["data"]["result"][0]["value"][1])
 
 
 # FIXME make avg
@@ -839,33 +839,49 @@ def calculate_lookback_minutes_from_deployment(deployment: V1Deployment) -> int:
         deployment = get_deployment_by_name("my-namespace", "my-deployment")
         lookback = calculate_lookback_minutes_from_deployment(deployment)
     """
+
     lookback_minutes = DEFAULT_LOOKBACK_MINUTES
+    _logger.debug("DEFAULT_LOOKBACK_MINUTES is %s" % DEFAULT_LOOKBACK_MINUTES)
+    if DEFAULT_LOOKBACK_MINUTES < MIN_LOOKBACK_MINUTES:
+        raise RuntimeError(
+            f"The specified lookback period ({lookback_minutes} minutes) is below the minimum required ({MIN_LOOKBACK_MINUTES} minutes). Please provide a longer lookback period to ensure sufficient historical data is available."
+        )
+
+    if deployment.metadata.creation_timestamp is None:
+        raise RuntimeError("The deployment has no creation timestamp.")
+
     creation_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
         deployment.metadata.creation_timestamp
     )
+
     if creation_minutes_ago < CREATE_AGE_THRESHOLD:
         raise RuntimeError(
             f"The deployment is too young. It was created {creation_minutes_ago} minutes ago, which is below the minimum threshold of {CREATE_AGE_THRESHOLD} minutes."
         )
+    lookback_minutes = min(MAX_LOOKBACK_MINUTES, lookback_minutes, creation_minutes_ago)
+    _logger.debug("creation_minutes_ago is %s" % creation_minutes_ago)
 
-    lookback_minutes = creation_minutes_ago
-
-    if "k8soptimizer.arvato-aws.io/last-update" in deployment.metadata.annotations:
-        update_minutes_ago = helpers.calculate_minutes_ago_from_timestamp(
-            deployment.metadata.creation_timestamp
+    if (
+        deployment.metadata.annotations is not None
+        and "k8soptimizer.arvato-aws.io/last-update" in deployment.metadata.annotations
+    ):
+        update_minutes_ago = (
+            helpers.calculate_minutes_ago_from_timestamp_str(
+                deployment.metadata.annotations[
+                    "k8soptimizer.arvato-aws.io/last-update"
+                ]
+            )
+            - OFFSET_LOOKBACK_MINUTES
         )
+
         if update_minutes_ago < UPDATE_AGE_THRESHOLD:
             raise RuntimeError(
-                f"The deployment was modified too recently. It was updated {update_minutes_ago} minutes ago, which is below the minimum threshold of {UPDATE_AGE_THRESHOLD} minutes since creation."
+                f"The deployment was optimized too recently. It was updated {update_minutes_ago} minutes ago, which is below the minimum threshold of {UPDATE_AGE_THRESHOLD} minutes since creation."
             )
         lookback_minutes = min(
-            lookback_minutes, (update_minutes_ago - OFFSET_LOOKBACK_MINUTES)
+            MAX_LOOKBACK_MINUTES, lookback_minutes, update_minutes_ago
         )
-
-    if lookback_minutes < MIN_LOOKBACK_MINUTES:
-        raise RuntimeError(
-            f"The specified lookback period ({lookback_minutes} minutes) is below the minimum required ({MIN_LOOKBACK_MINUTES} minutes). Please provide a longer lookback period to ensure sufficient historical data is available."
-        )
+        _logger.debug("update_minutes_ago is %s" % update_minutes_ago)
 
     history_samples = get_number_of_samples_from_history(
         deployment.metadata.namespace,
@@ -879,9 +895,18 @@ def calculate_lookback_minutes_from_deployment(deployment: V1Deployment) -> int:
             f"The provided history samples ({history_samples}) are below the minimum required ({MIN_LOOKBACK_MINUTES}). Please ensure an adequate amount of historical data is available."
         )
 
+    _logger.debug("history_samples is %s" % history_samples)
+
     lookback_minutes = min(MAX_LOOKBACK_MINUTES, lookback_minutes, history_samples)
 
-    return lookback_minutes
+    if lookback_minutes < MIN_LOOKBACK_MINUTES:
+        raise RuntimeError(
+            f"The specified lookback period ({lookback_minutes} minutes) is below the minimum required ({MIN_LOOKBACK_MINUTES} minutes). Please provide a longer lookback period to ensure sufficient historical data is available."
+        )
+
+    _logger.debug("final lookback_minutes is %s" % lookback_minutes)
+
+    return int(lookback_minutes)
 
 
 @beartype
@@ -1295,6 +1320,30 @@ def optimize_container_memory_limits(
     return int(new_memory_limit)
 
 
+def print_stats():
+    if stats["old_cpu_sum"] > 0:
+        diff_cpu_sum = round(((stats["new_cpu_sum"] / stats["old_cpu_sum"]) - 1) * 100)
+        diff_memory_sum = round(
+            ((stats["new_memory_sum"] / stats["old_memory_sum"]) - 1) * 100
+        )
+
+        _logger.info(
+            "Summary cpu requests change: {} -> {} ({}%)".format(
+                str(round(stats["old_cpu_sum"] * 1000)) + "m",
+                str(round(stats["new_cpu_sum"] * 1000)) + "m",
+                diff_cpu_sum,
+            )
+        )
+
+        _logger.info(
+            "Summary memory requests change: {} -> {} ({}%)".format(
+                str(round(stats["old_memory_sum"] / 1024 / 1024)) + "Mi",
+                str(round(stats["new_memory_sum"] / 1024 / 1024)) + "Mi",
+                diff_memory_sum,
+            )
+        )
+
+
 # ---- CLI ----
 # The functions defined in this section are wrappers around the main Python
 # API allowing them to be called directly from the terminal as a CLI
@@ -1448,31 +1497,11 @@ def main(args):
             try:
                 optimize_deployment(deployment, container_pattern, args.dry_run)
             except Exception as e:
-                _logger.exception(
+                _logger.warning(
                     "An error occurred while optimizing the deployment: %s", str(e)
                 )
 
-    if stats["old_cpu_sum"] > 0:
-        diff_cpu_sum = round(((stats["new_cpu_sum"] / stats["old_cpu_sum"]) - 1) * 100)
-        diff_memory_sum = round(
-            ((stats["new_memory_sum"] / stats["old_memory_sum"]) - 1) * 100
-        )
-
-        _logger.info(
-            "Summary cpu requests change: {} -> {} ({}%)".format(
-                str(round(stats["old_cpu_sum"] * 1000)) + "m",
-                str(round(stats["new_cpu_sum"] * 1000)) + "m",
-                diff_cpu_sum,
-            )
-        )
-
-        _logger.info(
-            "Summary memory requests change: {} -> {} ({}%)".format(
-                str(round(stats["old_memory_sum"] / 1024 / 1024)) + "Mi",
-                str(round(stats["new_memory_sum"] / 1024 / 1024)) + "Mi",
-                diff_memory_sum,
-            )
-        )
+    print_stats()
 
     _logger.info("Finished k8soptimizer")
 

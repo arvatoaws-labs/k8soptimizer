@@ -1075,3 +1075,134 @@ def test_get_oom_killed_history(mock_func1):
 
     # Verify that the function behaves as expected
     assert result == 0  # Check if the result is as expected
+
+
+# calculate_lookback_minutes_from_deployment
+
+
+@patch("k8soptimizer.main.get_number_of_samples_from_history")
+def test_calculate_lookback_minutes_from_deployment(mock_func1):
+    # Define a list of V1Namespace objects
+    deployment1 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment1",
+            namespace="default",
+            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
+        ),
+        spec=V1DeploymentSpec(
+            replicas=1,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(
+                                requests={"cpu": "1"}, limits={"cpu": "1"}
+                            ),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+
+    deployment2 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment2",
+            namespace="default",
+            creation_timestamp=datetime.now(timezone.utc),
+        ),
+        spec=V1DeploymentSpec(
+            replicas=2,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(limits={"cpu": "2"}),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+
+    deployment3 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment3",
+            annotations={
+                "k8soptimizer.arvato-aws.io/last-update": (
+                    datetime.now(timezone.utc) - timedelta(days=1)
+                ).isoformat()
+            },
+            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
+        ),
+        spec=V1DeploymentSpec(
+            replicas=0,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(limits={"cpu": "1"}),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+
+    deployment4 = V1Deployment(
+        metadata=V1ObjectMeta(
+            name="deployment4",
+            annotations={
+                "k8soptimizer.arvato-aws.io/last-update": (
+                    datetime.now(timezone.utc)
+                ).isoformat()
+            },
+            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
+        ),
+        spec=V1DeploymentSpec(
+            replicas=0,
+            selector=V1LabelSelector(match_labels={"app": "nginx"}),
+            template=V1PodTemplateSpec(
+                spec=V1PodSpec(
+                    containers=[
+                        V1Container(
+                            name="nginx",
+                            resources=V1ResourceRequirements(limits={"cpu": "1"}),
+                        )
+                    ]
+                )
+            ),
+        ),
+    )
+
+    mock_func1.return_value = 60
+
+    assert main.calculate_lookback_minutes_from_deployment(deployment1) == 60
+
+    with pytest.raises(RuntimeError) as exc_info:
+        main.calculate_lookback_minutes_from_deployment(deployment2)
+    assert str(exc_info.value).startswith("The deployment is too young")
+
+    assert main.calculate_lookback_minutes_from_deployment(deployment3) == 60
+
+    with pytest.raises(RuntimeError) as exc_info:
+        main.calculate_lookback_minutes_from_deployment(deployment4)
+    assert str(exc_info.value).startswith("The deployment was optimized too recently")
+
+    mock_func1.return_value = 0
+
+    with pytest.raises(RuntimeError) as exc_info:
+        main.calculate_lookback_minutes_from_deployment(deployment3)
+    assert str(exc_info.value).rfind("history samples") > 0
+
+    mock_func1.return_value = 999999
+
+    main.calculate_lookback_minutes_from_deployment(
+        deployment3
+    ) == main.MAX_LOOKBACK_MINUTES

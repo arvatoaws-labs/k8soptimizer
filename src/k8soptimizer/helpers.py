@@ -139,6 +139,25 @@ def calculate_minutes_ago_from_timestamp(datetime_object: datetime) -> int:
 
 
 @beartype
+def calculate_minutes_ago_from_timestamp_str(timestamp: str) -> int:
+    """
+    Calculate the number of minutes ago a given timestamp is from the current time.
+
+    Args:
+        datetime_object (datetime): The datetime object to calculate the minutes ago.
+
+    Returns:
+        int: The number of minutes ago.
+
+    Example:
+        timestamp = '2023-09-11T09:04:50.539072+00:00'
+        minutes_ago = calculate_minutes_ago_from_timestamp(timestamp)
+    """
+    datetime_object = datetime.fromisoformat(timestamp)
+    return calculate_minutes_ago_from_timestamp(datetime_object)
+
+
+@beartype
 def is_valid_regex(value: str) -> bool:
     try:
         re.compile(value)

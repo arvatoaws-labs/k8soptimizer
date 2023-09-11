@@ -62,6 +62,23 @@ def test_calculate_minutes_ago():
     assert helpers.calculate_minutes_ago_from_timestamp(timestamp3) == 0
 
 
+def test_calculate_minutes_ago_str():
+    # Create datetime objects from timestamp strings
+    timestamp1 = datetime.now(timezone.utc) - timedelta(days=1)
+    timestamp2 = datetime.now(timezone.utc) - timedelta(minutes=15)
+    timestamp3 = datetime.now(timezone.utc)
+
+    # Use the calculate_minutes_ago_from_timestamp function
+    assert (
+        helpers.calculate_minutes_ago_from_timestamp_str(timestamp1.isoformat())
+        == 60 * 24
+    )
+    assert (
+        helpers.calculate_minutes_ago_from_timestamp_str(timestamp2.isoformat()) == 15
+    )
+    assert helpers.calculate_minutes_ago_from_timestamp_str(timestamp3.isoformat()) == 0
+
+
 def test_create_timestamp_str():
     assert helpers.calculate_minutes_ago_from_timestamp(helpers.create_timestamp()) == 0
 
