@@ -69,7 +69,9 @@ DEFAULT_QUANTILE_OVER_TIME = float(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95)
 # operating mode
 DRY_RUN_MODE = float(os.getenv("DRY_RUN_MODE", False))
 
-MIN_CPU_REQUEST = float(os.getenv("MIN_CPU_REQUEST", 0.001))
+MIN_CPU_REQUEST = float(
+    os.getenv("MIN_CPU_REQUEST", 0.010)
+)  # below 10m will not work reliable with hpa
 MAX_CPU_REQUEST = float(os.getenv("MAX_CPU_REQUEST", 16))
 MAX_CPU_REQUEST_NODEJS = 1.0
 MIN_MEMORY_REQUEST = int(os.getenv("MIN_MEMORY_REQUEST", 1024**2 * 16))
@@ -865,23 +867,28 @@ def calculate_lookback_minutes_from_deployment(deployment: V1Deployment) -> int:
         deployment.metadata.annotations is not None
         and "k8soptimizer.arvato-aws.io/last-update" in deployment.metadata.annotations
     ):
-        update_minutes_ago = (
-            helpers.calculate_minutes_ago_from_timestamp_str(
-                deployment.metadata.annotations[
-                    "k8soptimizer.arvato-aws.io/last-update"
-                ]
-            )
-            - OFFSET_LOOKBACK_MINUTES
-        )
-
-        if update_minutes_ago < UPDATE_AGE_THRESHOLD:
-            raise RuntimeError(
-                f"The deployment was optimized too recently. It was updated {update_minutes_ago} minutes ago, which is below the minimum threshold of {UPDATE_AGE_THRESHOLD} minutes since creation."
-            )
-        lookback_minutes = min(
-            MAX_LOOKBACK_MINUTES, lookback_minutes, update_minutes_ago
+        update_minutes_ago = helpers.calculate_minutes_ago_from_timestamp_str(
+            deployment.metadata.annotations["k8soptimizer.arvato-aws.io/last-update"]
         )
         _logger.debug("update_minutes_ago is %s" % update_minutes_ago)
+        update_minutes_ago_with_offset = update_minutes_ago - OFFSET_LOOKBACK_MINUTES
+        _logger.debug(
+            "update_minutes_ago_with_offset is %s" % update_minutes_ago_with_offset
+        )
+
+        if update_minutes_ago < OFFSET_LOOKBACK_MINUTES:
+            raise RuntimeError(
+                f"The deployment was optimized too recently. It was updated {update_minutes_ago} minutes ago, which is even below the lookback offset of {OFFSET_LOOKBACK_MINUTES} minutes since last update."
+            )
+
+        if update_minutes_ago_with_offset < UPDATE_AGE_THRESHOLD:
+            raise RuntimeError(
+                f"The deployment was optimized too recently. It was updated {update_minutes_ago_with_offset} minutes ago, which is below the minimum threshold of {UPDATE_AGE_THRESHOLD} minutes since last update."
+            )
+
+        lookback_minutes = min(
+            MAX_LOOKBACK_MINUTES, lookback_minutes, update_minutes_ago_with_offset
+        )
 
     history_samples = get_number_of_samples_from_history(
         deployment.metadata.namespace,
@@ -892,7 +899,7 @@ def calculate_lookback_minutes_from_deployment(deployment: V1Deployment) -> int:
 
     if history_samples < MIN_LOOKBACK_MINUTES:
         raise RuntimeError(
-            f"The provided history samples ({history_samples}) are below the minimum required ({MIN_LOOKBACK_MINUTES}). Please ensure an adequate amount of historical data is available."
+            f"The provided history samples ({history_samples} samples) are below the minimum required ({MIN_LOOKBACK_MINUTES}). Please ensure an adequate amount of historical data is available."
         )
 
     _logger.debug("history_samples is %s" % history_samples)
@@ -935,6 +942,7 @@ def optimize_deployment(
 
     old_resources = get_resources_from_deployment(deployment)
     lookback_minutes = calculate_lookback_minutes_from_deployment(deployment)
+    _logger.info("Lookback minutes: %s" % lookback_minutes)
     target_ratio = calculate_hpa_target_ratio(
         namespace_name, deployment_name, lookback_minutes
     )
