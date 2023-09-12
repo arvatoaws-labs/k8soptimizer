@@ -97,9 +97,13 @@ Future ideas
 Quickstart
 ==========
 
-    install prometheus operator
-    apply rules from contrib folder
+
+    # install prometheus operator
+    # apply rules from contrib folder
+    kubectl apply -f contrib/prometheus-rules.yaml
+    # port forward prometheus
     kubectl port-forward -n monitoring service/prometheus-operator-kube-p-prometheus 9090:9090
+    # run k8soptimizer
     python3 src/k8soptimizer/main.py -n default -v --dry-run
 
 
