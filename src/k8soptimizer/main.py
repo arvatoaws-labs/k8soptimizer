@@ -4,10 +4,10 @@ console script. To run this script uncomment the following lines in the
 ``[options.entry_points]`` section in ``setup.cfg``::
 
     console_scripts =
-         fibonacci = k8soptimizer.main:run
+         k8soptimizer = k8soptimizer.main:run
 
 Then run ``pip install .`` (or ``pip install -e .`` for editable mode)
-which will install the command ``fibonacci`` inside your current environment.
+which will install the command ``k8soptimizer`` inside your current environment.
 
 Besides console scripts, the header (i.e. until ``_logger``...) of this file can
 also be used as template for Python modules.

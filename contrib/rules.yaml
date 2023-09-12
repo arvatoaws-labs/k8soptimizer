@@ -1,0 +1,28 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    release: prometheus
+    app: prometheus-operator
+  name: pod.rules
+  namespace: monitoring
+spec:
+  groups:
+  - name: pod-record.rules
+    interval: 1m
+    rules:
+    - record: kube_workload_container_resource_usage_cpu_cores_min
+      expr: min(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_cpu_cores_max
+      expr: max(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_cpu_cores_avg
+      expr: avg(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_memory_bytes_min
+      expr: min(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_memory_bytes_max
+      expr: max(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_memory_bytes_avg
+      expr: avg(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_memory_oom_killed
+      expr: sum(kube_pod_container_status_terminated_reason{job="kube-state-metrics", reason="OOMKilled"} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
