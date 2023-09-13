@@ -74,8 +74,10 @@ MIN_CPU_REQUEST = float(
 )  # below 10m will not work reliable with hpa
 MAX_CPU_REQUEST = float(os.getenv("MAX_CPU_REQUEST", 16))
 MAX_CPU_REQUEST_NODEJS = 1.0
+CPU_REQUEST_RATIO = float(os.getenv("CPU_REQUEST_RATIO", 1.0))
 MIN_MEMORY_REQUEST = int(os.getenv("MIN_MEMORY_REQUEST", 1024**2 * 16))
 MAX_MEMORY_REQUEST = int(os.getenv("MAX_MEMORY_REQUEST", 1024**3 * 16))
+MEMORY_REQUEST_RATIO = float(os.getenv("MEMORY_REQUEST_RATIO", 1.0))
 MEMORY_LIMIT_RATIO = float(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
 MIN_MEMORY_LIMIT = int(
     os.getenv("MIN_MEMORY_LIMIT", MIN_MEMORY_REQUEST * MEMORY_LIMIT_RATIO)
@@ -451,8 +453,8 @@ def calculate_hpa_target_ratio(
     hpa_min_replica = 0
     hpa_max_replica = 0
     hpa_range = 0
-    target_ratio_cpu = 1.0
-    target_ratio_memory = 1.0
+    target_ratio_cpu = CPU_REQUEST_RATIO
+    target_ratio_memory = MEMORY_REQUEST_RATIO
 
     hpa = get_hpa_for_deployment(namespace_name, deployment_name)
     if hpa is None:

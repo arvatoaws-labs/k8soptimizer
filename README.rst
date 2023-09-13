@@ -74,13 +74,15 @@ Differences between VPA
 - Supports lower memory requests (there is no 256MB minimum)
 - Supports normalized utilization
 - Updates the deployment object instead of the crated pod
-- Can run one time outside of the cluster
-
+- Can run as a cli command outside of the cluster
 
 Known issues
 --------
 
 - Flux or other management might rollback the changes
+- Change of CPU_REQUEST_RATIO or MEMORY_REQUEST_RATIO will only work if hpa is not used with the corresponding metric
+    - if you want to have more cpu headroom in a hpa usecase ensure that the target average utilization is set to a lower value like 80% or less
+    - if you want to have more memory headroom in a hpa usecase ensure that the target average utilization is set to a lower value like 80% or less
 
 Future ideas
 --------
@@ -182,7 +184,7 @@ DEFAULT_QUANTILE_OVER_TIME
 --------------------------
 
 - Default: `0.95`
-- Description: The default quantile used when querying metrics over time.
+- Description: The default quantile used when querying metrics over time. (max value is 1.0, a higher value will result in higher resource requests)
 
 DRY_RUN_MODE
 ------------
@@ -208,6 +210,12 @@ MAX_CPU_REQUEST_NODEJS
 - Default: `1.0`
 - Description: The maximum CPU request value for Node.js applications.
 
+CPU_REQUEST_RATIO
+-------------------
+
+- Default: `1.0`
+- Description: The ratio used to calculate cpu requests. (changing this might break the normalized utilization calculation and will cause problems with hpa)
+
 MIN_MEMORY_REQUEST
 -------------------
 
@@ -219,6 +227,12 @@ MAX_MEMORY_REQUEST
 
 - Default: `17179869184` (16 GiB)
 - Description: The maximum memory request value (in bytes).
+
+MEMORY_REQUEST_RATIO
+-------------------
+
+- Default: `1.0`
+- Description: The ratio used to calculate memory requests. (changing this might break the normalized utilization calculation and will cause problems with hpa)
 
 MEMORY_LIMIT_RATIO
 -------------------
