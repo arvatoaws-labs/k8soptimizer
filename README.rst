@@ -92,6 +92,7 @@ Future ideas
 - Support for jvm discovery, maybe the memory request can be reduced (right now a java app would not lower memory consumption because it takes all it can get)
 - Support for statefulesets and daemonsets
 - Support for kubernetes events (to see oom kills and others useful events)
+- Store recommendations in a configmap and use it for helm deployment
 - Dynamic configuration based on namespace or object annotations
 - Admission Controller mode
 - Better logging and alerting
@@ -257,3 +258,21 @@ CHANGE_THRESHOLD
 
 - Default: `0.1`
 - Description: The threshold used to determine if a change in resources is significant.
+
+HPA_THRESHOLD
+----------------
+
+- Default: `0.5`
+- Description: The threshold used to determine if a the current number of replicas is near the limit (1.0 is max = limit reached, 0.0 is min = min_relpicas).
+
+LOG_LEVEL
+----------------
+
+- Default: `info`
+- Description: The loglevel used for all logging.
+
+LOG_FORMAT
+----------------
+
+- Default: `json`
+- Description: The logformat used for all logging.

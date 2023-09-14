@@ -6,7 +6,7 @@ import pytest
 import k8soptimizer.helpers as helpers
 
 __author__ = "Philipp Hellmich"
-__copyright__ = "Philipp Hellmich"
+__copyright__ = "Arvato Systems GmbH"
 __license__ = "MIT"
 
 

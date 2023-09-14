@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 
 from beartype import beartype
 
+__author__ = "Philipp Hellmich"
+__copyright__ = "Arvato Systems GmbH"
+__license__ = "MIT"
+
 
 @beartype
 def convert_memory_request_to_bytes(size: str) -> int:
