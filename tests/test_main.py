@@ -1,5 +1,4 @@
 import json
-import logging
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -947,18 +946,6 @@ def test_parse_args_version(capsys):
     captured = capsys.readouterr()
     assert "k8soptimizer" in captured.out
     assert excinfo.value.code == 0
-
-
-def test_parse_args_verbose():
-    args = ["-v"]
-    parsed_args = main.parse_args(args)
-    assert parsed_args.loglevel == logging.INFO
-
-
-def test_parse_args_very_verbose():
-    args = ["-vv"]
-    parsed_args = main.parse_args(args)
-    assert parsed_args.loglevel == logging.DEBUG
 
 
 @patch("k8soptimizer.main.optimize_deployment")

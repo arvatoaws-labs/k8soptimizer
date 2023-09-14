@@ -1,3 +1,4 @@
 beartype
 kubernetes
+python-json-logger
 requests

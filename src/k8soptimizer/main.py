@@ -38,8 +38,9 @@ from kubernetes.client.models import (
     V1NamespaceList,
     V2HorizontalPodAutoscaler,
 )
+from pythonjsonlogger import jsonlogger
 
-from k8soptimizer import __version__, helpers
+from . import __version__, helpers
 
 __author__ = "Philipp Hellmich"
 __copyright__ = "Arvato Systems GmbH"
@@ -67,7 +68,7 @@ DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 3600 * 24 *
 DEFAULT_QUANTILE_OVER_TIME = float(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95))
 
 # operating mode
-DRY_RUN_MODE = float(os.getenv("DRY_RUN_MODE", False))
+DRY_RUN_MODE = bool(os.getenv("DRY_RUN_MODE", False))
 
 MIN_CPU_REQUEST = float(
     os.getenv("MIN_CPU_REQUEST", 0.010)
@@ -86,6 +87,10 @@ MAX_MEMORY_LIMIT = int(
     os.getenv("MAX_MEMORY_LIMIT", MAX_MEMORY_REQUEST * MEMORY_LIMIT_RATIO)
 )
 CHANGE_THRESHOLD = os.getenv("CHANGE_THRESHOLD", 0.1)
+HPA_THRESHOLD = os.getenv("HPA_THRESHOLD", 0.5)
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FORMAT = os.getenv("LOG_FORMAT", "json").lower()
 
 stats = {}
 stats["old_cpu_sum"] = 0
@@ -98,6 +103,43 @@ stats["new_memory_sum"] = 0
 # Python scripts/interactive interpreter, e.g. via
 # `from k8soptimizer.skeleton import fib`,
 # when using this Python module as a library.
+
+
+class AppFilter(logging.Filter):
+    extra = {}
+
+    def __init__(self, extra={}):
+        self.extra = extra
+        super(AppFilter, self).__init__()
+
+    def filter(self, record):
+        for key, value in self.extra.items():
+            record.__setattr__(key, value)
+        for key in list(record.__dict__.keys()):
+            if key not in self.extra and key not in [
+                "name",
+                "msg",
+                "args",
+                "levelname",
+                "levelno",
+                "pathname",
+                "filename",
+                "module",
+                "exc_info",
+                "exc_text",
+                "stack_info",
+                "lineno",
+                "funcName",
+                "created",
+                "msecs",
+                "relativeCreated",
+                "thread",
+                "threadName",
+                "processName",
+                "process",
+            ]:
+                del record.__dict__[key]
+        return True
 
 
 @beartype
@@ -166,11 +208,8 @@ def verify_kubernetes_connection() -> bool:
     Example:
         connection_successful = verify_kubernetes_connection()
     """
-    try:
-        config.load_kube_config()
-        client.ApisApi().get_api_versions_with_http_info()
-    except (config.exceptions.ConfigException, client.exceptions.ApiException):
-        raise RuntimeError("Connection to kubernetes api failed")
+    config.load_kube_config()
+    client.ApisApi().get_api_versions_with_http_info()
     return True
 
 
@@ -205,7 +244,7 @@ def get_number_of_samples_from_history(
 
     Args:
         namespace (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
+        workload (str): The name of the workload (e.g., myapp).
         workload_type (str, optional): The type of workload. Default is "deployment".
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
 
@@ -284,7 +323,7 @@ def get_cpu_cores_usage_history(
 
     Args:
         namespace (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
+        workload (str): The name of the workload (e.g., myapp).
         container (str): The name of the container.
         workload_type (str, optional): The type of workload. Default is "deployment".
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
@@ -328,7 +367,7 @@ def get_memory_bytes_usage_history(
 
     Args:
         namespace (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
+        workload (str): The name of the workload (e.g., myapp).
         container (str): The name of the container.
         workload_type (str, optional): The type of workload. Default is "deployment".
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
@@ -367,7 +406,7 @@ def discover_container_runtime(
 
     Args:
         namespace (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
+        workload (str): The name of the workload (e.g., myapp).
         container (str): The name of the container.
         workload_type (str, optional): The type of workload. Default is "deployment".
 
@@ -458,6 +497,7 @@ def calculate_hpa_target_ratio(
 
     hpa = get_hpa_for_deployment(namespace_name, deployment_name)
     if hpa is None:
+        _logger.info("Hpa not found for: %s" % deployment_name)
         return {"cpu": float(target_ratio_cpu), "memory": float(target_ratio_memory)}
 
     hpa_min_replica = hpa.spec.min_replicas
@@ -487,19 +527,19 @@ def calculate_hpa_target_ratio(
         )
     )
 
-    _logger.info("Hpa min repliacs: %s" % hpa_min_replica)
-    _logger.info("Hpa max replicas: %s" % hpa_max_replica)
-    _logger.info("Hpa avg count history: %s" % replica_count_history)
+    _logger.debug("Hpa min repliacs: %s" % hpa_min_replica)
+    _logger.debug("Hpa max replicas: %s" % hpa_max_replica)
+    _logger.debug("Hpa avg count history: %s" % replica_count_history)
 
     # increase cpu request if current replica count is higher than min replica count
     if replica_count_history > hpa_min_replica and hpa_range > 0:
-        _logger.info("Hpa avg range: %s" % hpa_range)
+        _logger.debug("Hpa avg range: %s" % hpa_range)
         hpa_range_position = replica_count_history - hpa_min_replica
-        _logger.info("Hpa avg range position: %s" % hpa_range_position)
+        _logger.debug("Hpa avg range position: %s" % hpa_range_position)
         hpa_ratio_addon = round((hpa_range_position) / hpa_range, 2)
 
-    if hpa_ratio_addon > 0.5:
-        _logger.info(
+    if hpa_ratio_addon > HPA_THRESHOLD:
+        _logger.debug(
             "Increasing target ratio cpu due to hpa near limit: %s" % hpa_ratio_addon
         )
         target_ratio_cpu = round(target_ratio_cpu + hpa_ratio_addon, 3)
@@ -521,8 +561,8 @@ def calculate_cpu_requests(
 
     Args:
         namespace_name (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
-        workload_type (str): The type of workload.
+        workload (str): The name of the workload (e.g., myapp).
+        workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
         target_ratio_cpu (float): The target ratio for CPU.
         lookback_minutes (int): The number of minutes to look back in time for historical data.
@@ -553,6 +593,7 @@ def calculate_cpu_requests(
     runtime = discover_container_runtime(
         namespace_name, workload, container_name, workload_type
     )
+    _logger.debug("Runtime: %s" % runtime)
     if runtime == "nodejs":
         new_cpu = min(MAX_CPU_REQUEST_NODEJS, new_cpu)
 
@@ -573,8 +614,8 @@ def calculate_memory_requests(
 
     Args:
         namespace_name (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
-        workload_type (str): The type of workload.
+        workload (str): The name of the workload (e.g., myapp).
+        workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
         target_ratio_memory (float): The target ratio for memory.
         lookback_minutes (int): The number of minutes to look back in time for historical data.
@@ -625,8 +666,8 @@ def calculate_memory_limits(
 
     Args:
         namespace_name (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
-        workload_type (str): The type of workload.
+        workload (str): The name of the workload (e.g., myapp).
+        workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
         memory_requests (int): The memory requests in bytes.
 
@@ -734,7 +775,7 @@ def get_oom_killed_history(
 
     Args:
         namespace (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
+        workload (str): The name of the workload (e.g., myapp).
         container (str): The name of the container.
         workload_type (str, optional): The type of workload. Default is "deployment".
         lookback_minutes (int, optional): The number of minutes to look back in time for historical data.
@@ -773,7 +814,7 @@ def is_nodejs_container(
 
     Args:
         namespace (str): The name of the Kubernetes namespace.
-        workload (str): The name of the workload (e.g., deployment).
+        workload (str): The name of the workload (e.g., myapp).
         container (str): The name of the container.
         workload_type (str, optional): The type of workload. Default is "deployment".
 
@@ -944,6 +985,11 @@ def optimize_deployment(
     apis_api = client.AppsV1Api()
     namespace_name = deployment.metadata.namespace
     deployment_name = deployment.metadata.name
+
+    extra = {"namespace": namespace_name, "deployment": deployment_name}
+    _logger.addFilter(AppFilter(extra))
+    # _logger = logging.LoggerAdapter(_logger, extra)
+
     _logger.info("Optimizing deployment: %s" % deployment_name)
 
     old_resources = get_resources_from_deployment(deployment)
@@ -957,6 +1003,12 @@ def optimize_deployment(
     changed = False
     for i, container in enumerate(deployment.spec.template.spec.containers):
         container_name = container.name
+        extra = {
+            "namespace": namespace_name,
+            "deployment": deployment_name,
+            "container": container_name,
+        }
+        _logger.addFilter(AppFilter(extra))
         x = re.search(container_pattern, container_name)
         if x is None:
             _logger.debug(
@@ -977,6 +1029,9 @@ def optimize_deployment(
         if changed_container:
             changed = True
         deployment.spec.template.spec.containers[i] = container_new
+
+    extra = {"namespace": namespace_name, "deployment": deployment_name}
+    _logger.addFilter(AppFilter(extra))
 
     if changed:
         deployment.metadata.annotations[
@@ -1399,23 +1454,24 @@ def parse_args(args):
         action="version",
         version=f"k8soptimizer {__version__}",
     )
-    # parser.add_argument(dest="n", help="n-th Fibonacci number", type=int, metavar="INT")
+
     parser.add_argument(
-        "-v",
-        "--verbose",
+        "--log",
+        "--log-level",
+        action="store",
+        default=LOG_LEVEL,
+        help="Set loglevel.",
         dest="loglevel",
-        help="set loglevel to INFO",
-        action="store_const",
-        const=logging.INFO,
     )
+
     parser.add_argument(
-        "-vv",
-        "--very-verbose",
-        dest="loglevel",
-        help="set loglevel to DEBUG",
-        action="store_const",
-        const=logging.DEBUG,
+        "--log-format",
+        action="store",
+        default=LOG_FORMAT,
+        help="Set logformat (txt, json).",
+        dest="logformat",
     )
+
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -1481,16 +1537,37 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
-def setup_logging(loglevel):
+def setup_logging(loglevel: str = "info", logformat: str = "json"):
     """Setup basic logging
 
     Args:
         loglevel (int): minimum loglevel for emitting messages
     """
-    logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
-    logging.basicConfig(
-        level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
-    )
+
+    # logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
+    # logging.basicConfig(
+    #     level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
+    # )
+
+    logger = logging.getLogger()
+
+    if logformat == "txt":
+        log_handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            "[%(asctime)s] %(levelname)s: %(name)s:%(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    elif logformat == "json":
+        log_handler = logging.StreamHandler(sys.stdout)
+        formatter = jsonlogger.JsonFormatter(
+            "%(timestamp)s %(levelname)s %(message)s ", timestamp=True
+        )
+    else:
+        raise ValueError("Invalid logformat. Use 'txt' or 'json'.")
+
+    log_handler.setFormatter(formatter)
+    logger.addHandler(log_handler)
+    logger.setLevel(loglevel.upper())
 
 
 def main(args):
@@ -1504,7 +1581,7 @@ def main(args):
             (for example  ``["--verbose", "42"]``).
     """
     args = parse_args(args)
-    setup_logging(args.loglevel)
+    setup_logging(args.loglevel, args.logformat)
     _logger.info("Starting k8soptimizer...")
 
     verify_kubernetes_connection()
@@ -1524,6 +1601,8 @@ def main(args):
     _logger.info("Using container_pattern: {}".format(container_pattern))
 
     for namespace in get_namespaces(namespace_pattern).items:
+        extra = {"namespace": namespace.metadata.name}
+        _logger.addFilter(AppFilter(extra))
         for deployment in get_deployments(
             namespace.metadata.name, deplopyment_pattern
         ).items:
@@ -1533,6 +1612,9 @@ def main(args):
                 _logger.warning(
                     "An error occurred while optimizing the deployment: %s", str(e)
                 )
+
+    extra = {}
+    _logger.addFilter(AppFilter(extra))
 
     print_stats()
 
