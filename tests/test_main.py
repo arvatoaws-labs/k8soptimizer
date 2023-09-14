@@ -30,7 +30,7 @@ from kubernetes.client.models import (
 import k8soptimizer.main as main
 
 __author__ = "Philipp Hellmich"
-__copyright__ = "Philipp Hellmich"
+__copyright__ = "Arvato Systems GmbH"
 __license__ = "MIT"
 
 
