@@ -73,7 +73,7 @@ Differences between VPA
 - Supports running together wtih hpa (they won't fight each other)
 - Supports lower memory requests (there is no 256MB minimum)
 - Supports normalized utilization
-- Updates the deployment object instead of the crated pod
+- Updates the deployment object instead of the pod
 - Can run as a cli command outside of the cluster
 
 Known issues
