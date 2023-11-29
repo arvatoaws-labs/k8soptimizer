@@ -18,11 +18,46 @@ spec:
       expr: max(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
     - record: kube_workload_container_resource_usage_cpu_cores_avg
       expr: avg(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_cpu_cores_sum
+      expr: sum(node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate{} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
     - record: kube_workload_container_resource_usage_memory_bytes_min
       expr: min(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
     - record: kube_workload_container_resource_usage_memory_bytes_max
       expr: max(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
     - record: kube_workload_container_resource_usage_memory_bytes_avg
       expr: avg(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+    - record: kube_workload_container_resource_usage_memory_bytes_sum
+      expr: sum(container_memory_working_set_bytes * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
     - record: kube_workload_container_resource_usage_memory_oom_killed
       expr: sum(kube_pod_container_status_terminated_reason{job="kube-state-metrics", reason="OOMKilled"} * on(namespace,pod) group_left(workload, workload_type) namespace_workload_pod:kube_pod_owner:relabel{}) by (namespace, workload, workload_type, container)
+
+# https://about.gitlab.com/blog/2019/07/23/anomaly-detection-using-prometheus/
+  - name: pod-prediction-record.rules
+    interval: 15m
+    rules:
+    # Long-term average value for the series
+    - record: kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w
+      expr: avg_over_time(kube_workload_container_resource_usage_cpu_cores_sum[1w])
+    # Long-term standard deviation for the series
+    - record: kube_workload_container_resource_usage_cpu_cores_sum:stddev_over_time_1w
+      expr: stddev_over_time(kube_workload_container_resource_usage_cpu_cores_sum[1w])
+    # prediction for the next 4 hours
+    # - record: kube_workload_container_resource_usage_cpu_cores_sum_prediction
+    #   expr: >
+    #   quantile(0.5,
+    #     label_replace(
+    #       avg_over_time(kube_workload_container_resource_usage_cpu_cores_sum[4h] offset 166h)
+    #       + kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w - kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w offset 1w
+    #       , "offset", "1w", "", "")
+    #     or
+    #     label_replace(
+    #       avg_over_time(kube_workload_container_resource_usage_cpu_cores_sum[4h] offset 334h)
+    #       + kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w - kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w offset 2w
+    #       , "offset", "2w", "", "")
+    #     or
+    #     label_replace(
+    #       avg_over_time(kube_workload_container_resource_usage_cpu_cores_sum[4h] offset 502h)
+    #       + kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w - kube_workload_container_resource_usage_cpu_cores_sum:avg_over_time_1w offset 3w
+    #       , "offset", "3w", "", "")
+    #   )
+    #   without (offset)

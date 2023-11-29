@@ -390,204 +390,57 @@ def test_get_hpa_for_deployment(mock_requests_get):
     assert result.metadata.name == "deployment1"
 
 
-test_data_hpa = [
-    # Test case 0: Normal case
-    {
-        "input_params": {
-            "avg_cpu": 100,
-            "avg_memory": 100,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 3,
-        },
-        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.0},
-    },
-    # Test case 1: Expected to raise CPU ratio to match HPA
-    {
-        "input_params": {
-            "avg_cpu": 80,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 3,
-        },
-        "expected_output": {"ratio_cpu": 1.25, "ratio_memory": 1},
-    },
-    # Test case 2: Expected to raise memory ratio to match HPA
-    {
-        "input_params": {
-            "avg_memory": 80,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 3,
-        },
-        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.25},
-    },
-    # Test case 3: Expected to raise both CPU and memory ratio to match HPA
-    {
-        "input_params": {
-            "avg_cpu": 80,
-            "avg_memory": 80,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 3,
-        },
-        "expected_output": {"ratio_cpu": 1.25, "ratio_memory": 1.25},
-    },
-    # Test case 4: Expected to raise CPU because of max_replicas reached
-    {
-        "input_params": {
-            "avg_cpu": 100,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 10,
-        },
-        "expected_output": {"ratio_cpu": 2.0, "ratio_memory": 1.0},
-    },
-    # Test case 5: Expected to raise CPU because is almost max_replicas reached
-    {
-        "input_params": {
-            "avg_cpu": 100,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 9,
-        },
-        "expected_output": {"ratio_cpu": 1.89, "ratio_memory": 1.0},
-    },
-    # Test case 6: Expected to raise CPU ratio because max_replicas is reached
-    {
-        "input_params": {
-            "avg_cpu": 100,
-            "avg_memory": 100,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 3,
-            "pod_oom_history": 5,
-        },
-        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.0},
-    },
-    # Test case 7: Expected to raise CPU and memory ratio because almost max_replicas is reached and ooms werde found
-    {
-        "input_params": {
-            "avg_cpu": 100,
-            "avg_memory": 100,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 3,
-            "pod_oom_history": 5,
-        },
-        "expected_output": {"ratio_cpu": 1.0, "ratio_memory": 1.0},
-    },
-    # Test case 8: Expected to raise both CPU and memory ratio to match HPA even if history is 0
-    {
-        "input_params": {
-            "avg_cpu": 80,
-            "avg_memory": 80,
-            "min_replicas": 1,
-            "max_replicas": 10,
-            "pod_replica_history": 0,
-            "pod_oom_history": 0,
-        },
-        "expected_output": {"ratio_cpu": 1.25, "ratio_memory": 1.25},
-    },
-]
-
-
-@pytest.mark.parametrize("test_case", test_data_hpa)
-@patch("k8soptimizer.main.get_oom_killed_history")
-@patch("k8soptimizer.main.get_max_pods_per_deployment_history")
-@patch("k8soptimizer.main.get_hpa_for_deployment")
-def test_calculate_hpa_target_ratio(mock_func1, mock_func2, mock_func3, test_case):
-    # Extract input parameters and expected output from the test case
-    input_params = test_case["input_params"]
-    expected_output = test_case["expected_output"]
-
-    metrics = []
-    if "avg_memory" in input_params:
-        metrics.append(
-            V2MetricSpec(
-                type="Resource",
-                resource=V2ResourceMetricSource(
-                    name="memory",
-                    target=V2MetricTarget(
-                        average_utilization=input_params["avg_memory"],
-                        type="Utilization",
-                    ),
-                ),
-            )
-        )
-    if "avg_cpu" in input_params:
-        metrics.append(
-            V2MetricSpec(
-                type="Resource",
-                resource=V2ResourceMetricSource(
-                    name="cpu",
-                    target=V2MetricTarget(
-                        average_utilization=input_params["avg_cpu"], type="Utilization"
-                    ),
-                ),
-            )
-        )
-
-    hpa1 = V2HorizontalPodAutoscaler(
-        metadata=V1ObjectMeta(name="deployment1"),
-        spec=V2HorizontalPodAutoscalerSpec(
-            max_replicas=input_params["max_replicas"],
-            min_replicas=input_params["min_replicas"],
-            metrics=metrics,
-            scale_target_ref=V2CrossVersionObjectReference(
-                kind="Deployment", name="deployment1"
-            ),
-        ),
-    )
-
-    mock_func1.return_value = hpa1
-    mock_func2.return_value = input_params["pod_replica_history"]
-    mock_func3.return_value = 0
-    if "pod_oom_history" in input_params:
-        mock_func3.return_value = input_params["pod_oom_history"]
-
-    # Call the function under test
-    result = main.calculate_hpa_target_ratio("default", "deployment1")
-
-    assert result["cpu"] == pytest.approx(expected_output["ratio_cpu"], rel=1e-2)
-    assert result["memory"] == pytest.approx(expected_output["ratio_memory"], rel=1e-2)
-
-
 test_data_cpu = [
     # Test case 0: Normal case
     {
         "input_params": {
             "cpu_history": main.MIN_CPU_REQUEST + 1,
-            "cpu_ratio": 1.0,
+            "target_replicas": 1,
             "runtime": None,
         },
         "expected_output": main.MIN_CPU_REQUEST + 1,
     },
     # Test case 1: Below min cpu
     {
-        "input_params": {"cpu_history": 0.000001, "cpu_ratio": 1.0, "runtime": None},
+        "input_params": {
+            "cpu_history": 0.000001,
+            "target_replicas": 1,
+            "runtime": None,
+        },
         "expected_output": main.MIN_CPU_REQUEST,
     },
     # Test case 2: Below min cpu
     {
-        "input_params": {"cpu_history": 1, "cpu_ratio": 0.000001, "runtime": None},
+        "input_params": {
+            "cpu_history": 1,
+            "target_replicas": 9999999999,
+            "runtime": None,
+        },
         "expected_output": main.MIN_CPU_REQUEST,
     },
     # Test case 3: Higher max cpu
     {
-        "input_params": {"cpu_history": 9999999999, "cpu_ratio": 1.0, "runtime": None},
+        "input_params": {
+            "cpu_history": 9999999999,
+            "target_replicas": 2,
+            "runtime": None,
+        },
         "expected_output": main.MAX_CPU_REQUEST,
     },
     # Test case 4: Higher max cpu
     {
-        "input_params": {"cpu_history": 1, "cpu_ratio": 9999999999.0, "runtime": None},
+        "input_params": {
+            "cpu_history": main.MAX_CPU_REQUEST + 1,
+            "target_replicas": 1,
+            "runtime": None,
+        },
         "expected_output": main.MAX_CPU_REQUEST,
     },
     # Test case 5: nodejs
     {
         "input_params": {
             "cpu_history": 10,
-            "cpu_ratio": 9999999999.0,
+            "target_replicas": 2,
             "runtime": "nodejs",
         },
         "expected_output": main.MAX_CPU_REQUEST_NODEJS,
@@ -619,7 +472,7 @@ def test_calculate_cpu_requests(mock_func1, mock_func2, test_case):
         deployment_name,
         "development",
         "nginx",
-        input_params["cpu_ratio"],
+        input_params["target_replicas"],
         main.DEFAULT_LOOKBACK_MINUTES,
     )
 
@@ -1066,134 +919,6 @@ def test_get_oom_killed_history(mock_func1):
 
 
 # calculate_lookback_minutes_from_deployment
-
-
-@patch("k8soptimizer.main.get_number_of_samples_from_history")
-def test_calculate_lookback_minutes_from_deployment(mock_func1):
-    # Define a list of V1Namespace objects
-    deployment1 = V1Deployment(
-        metadata=V1ObjectMeta(
-            name="deployment1",
-            namespace="default",
-            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
-        ),
-        spec=V1DeploymentSpec(
-            replicas=1,
-            selector=V1LabelSelector(match_labels={"app": "nginx"}),
-            template=V1PodTemplateSpec(
-                spec=V1PodSpec(
-                    containers=[
-                        V1Container(
-                            name="nginx",
-                            resources=V1ResourceRequirements(
-                                requests={"cpu": "1"}, limits={"cpu": "1"}
-                            ),
-                        )
-                    ]
-                )
-            ),
-        ),
-    )
-
-    deployment2 = V1Deployment(
-        metadata=V1ObjectMeta(
-            name="deployment2",
-            namespace="default",
-            creation_timestamp=datetime.now(timezone.utc),
-        ),
-        spec=V1DeploymentSpec(
-            replicas=2,
-            selector=V1LabelSelector(match_labels={"app": "nginx"}),
-            template=V1PodTemplateSpec(
-                spec=V1PodSpec(
-                    containers=[
-                        V1Container(
-                            name="nginx",
-                            resources=V1ResourceRequirements(limits={"cpu": "2"}),
-                        )
-                    ]
-                )
-            ),
-        ),
-    )
-
-    deployment3 = V1Deployment(
-        metadata=V1ObjectMeta(
-            name="deployment3",
-            annotations={
-                "k8soptimizer.arvato-aws.io/last-update": (
-                    datetime.now(timezone.utc) - timedelta(days=1)
-                ).isoformat()
-            },
-            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
-        ),
-        spec=V1DeploymentSpec(
-            replicas=0,
-            selector=V1LabelSelector(match_labels={"app": "nginx"}),
-            template=V1PodTemplateSpec(
-                spec=V1PodSpec(
-                    containers=[
-                        V1Container(
-                            name="nginx",
-                            resources=V1ResourceRequirements(limits={"cpu": "1"}),
-                        )
-                    ]
-                )
-            ),
-        ),
-    )
-
-    deployment4 = V1Deployment(
-        metadata=V1ObjectMeta(
-            name="deployment4",
-            annotations={
-                "k8soptimizer.arvato-aws.io/last-update": (
-                    datetime.now(timezone.utc)
-                ).isoformat()
-            },
-            creation_timestamp=datetime.now(timezone.utc) - timedelta(days=1),
-        ),
-        spec=V1DeploymentSpec(
-            replicas=0,
-            selector=V1LabelSelector(match_labels={"app": "nginx"}),
-            template=V1PodTemplateSpec(
-                spec=V1PodSpec(
-                    containers=[
-                        V1Container(
-                            name="nginx",
-                            resources=V1ResourceRequirements(limits={"cpu": "1"}),
-                        )
-                    ]
-                )
-            ),
-        ),
-    )
-
-    mock_func1.return_value = 60
-
-    assert main.calculate_lookback_minutes_from_deployment(deployment1) == 60
-
-    with pytest.raises(RuntimeError) as exc_info:
-        main.calculate_lookback_minutes_from_deployment(deployment2)
-    assert str(exc_info.value).startswith("The deployment is too young")
-
-    assert main.calculate_lookback_minutes_from_deployment(deployment3) == 60
-
-    with pytest.raises(RuntimeError) as exc_info:
-        main.calculate_lookback_minutes_from_deployment(deployment4)
-    assert str(exc_info.value).startswith("The deployment was optimized too recently")
-
-    mock_func1.return_value = 0
-
-    with pytest.raises(RuntimeError) as exc_info:
-        main.calculate_lookback_minutes_from_deployment(deployment3)
-    assert str(exc_info.value).rfind("history samples") > 0
-
-    mock_func1.return_value = 999999
-
-    main.calculate_lookback_minutes_from_deployment(
-        deployment3
-    ) == main.MAX_LOOKBACK_MINUTES
 
 
 test_data_optimize_container = [
