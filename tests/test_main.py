@@ -708,9 +708,10 @@ def test_get_resources_from_deployment():
     # assert result == expected_result
 
 
-@patch("k8soptimizer.main.client.AppsV1Api.patch_namespaced_deployment")
-@patch("k8soptimizer.main.calculate_lookback_minutes_from_deployment")
+@patch("k8soptimizer.main.calculate_target_replicas")
+@patch("k8soptimizer.main.calculate_quantile_over_time")
 @patch("k8soptimizer.main.optimize_container")
+@patch("k8soptimizer.main.client.AppsV1Api.patch_namespaced_deployment")
 def test_optimize_deployment(mock_func1, mock_func2, mock_func3, mock_func4):
     deployment1_input = V1Deployment(
         metadata=V1ObjectMeta(
@@ -777,9 +778,10 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3, mock_func4):
         ),
     )
 
-    mock_func1.return_value = deployment1_output, True
-    mock_func2.return_value = {"cpu": 2, "memory": 2}
-    mock_func3.return_value = True
+    mock_func4.return_value = 1
+    mock_func3.return_value = {"cpu": 0.90, "memory": 0.90}
+    mock_func2.return_value = deployment1_output, True
+    mock_func1.return_value = True
 
     result = main.optimize_deployment(deployment1_input)
 
@@ -918,34 +920,101 @@ def test_get_oom_killed_history(mock_func1):
     assert result == 0  # Check if the result is as expected
 
 
-# calculate_lookback_minutes_from_deployment
-
-
-test_data_optimize_container = [
+test_data_memory = [
     # Test case 0: Normal case
     {
-        "request": main.MIN_MEMORY_REQUEST + 1,
-        "limit": round((main.MIN_MEMORY_REQUEST + 1) * main.MEMORY_LIMIT_RATIO),
+        "input_params": {
+            "memory_history": main.MIN_MEMORY_LIMIT + 1024,
+            "target_replicas": 1,
+            "runtime": None,
+        },
+        "expected_output": (main.MIN_MEMORY_LIMIT + 1024) * main.MEMORY_LIMIT_RATIO,
     },
-    # Test case 1: Too low values
-    {"request": 1024**2 * 1, "limit": main.MIN_MEMORY_LIMIT},
-    # Test case 2: Too high values
-    {"request": 1024**3 * 999999, "limit": main.MAX_MEMORY_LIMIT},
-    # Test case 3: Too high values
-    {"request": main.MAX_MEMORY_LIMIT + 1024, "limit": main.MAX_MEMORY_LIMIT},
+    # Test case 1: Below min memory
+    {
+        "input_params": {
+            "memory_history": 0.000001,
+            "target_replicas": 1,
+            "runtime": None,
+        },
+        "expected_output": main.MIN_MEMORY_LIMIT,
+    },
+    # Test case 2: Below min memory
+    {
+        "input_params": {
+            "memory_history": 1,
+            "target_replicas": 1,
+            "runtime": None,
+        },
+        "expected_output": main.MIN_MEMORY_LIMIT,
+    },
+    # Test case 3: Higher max memory
+    {
+        "input_params": {
+            "memory_history": 999999999999999,
+            "target_replicas": 1,
+            "runtime": None,
+        },
+        "expected_output": main.MAX_MEMORY_LIMIT,
+    },
+    # Test case 4: Higher max memory
+    {
+        "input_params": {
+            "memory_history": 999999999999999,
+            "target_replicas": 999999999999999,
+            "runtime": None,
+        },
+        "expected_output": main.MAX_MEMORY_LIMIT,
+    },
+    # Test case 5: nodejs
+    {
+        "input_params": {
+            "memory_history": 999999999999999,
+            "target_replicas": 10,
+            "runtime": "nodejs",
+        },
+        "expected_output": main.MAX_MEMORY_LIMIT,
+    },
+    # Test case 6: OOM killed
+    {
+        "input_params": {
+            "memory_history": main.MIN_MEMORY_LIMIT + 1024,
+            "target_replicas": 1,
+            "runtime": None,
+            "oom_killed": 11,
+        },
+        "expected_output": (main.MIN_MEMORY_LIMIT + 1024) * 2 * main.MEMORY_LIMIT_RATIO,
+    },
 ]
 
 
-@pytest.mark.parametrize("test_case", test_data_optimize_container)
-def test_calculate_memory_limits(test_case):
-    # Define your test data and expected response
+@pytest.mark.parametrize("test_case", test_data_memory)
+@patch("k8soptimizer.main.get_oom_killed_history")
+@patch("k8soptimizer.main.discover_container_runtime")
+@patch("k8soptimizer.main.get_memory_bytes_usage_history")
+def test_calculate_memory_limits(mock_func1, mock_func2, mock_func3, test_case):
     namespace_name = "test_namespace"
     deployment_name = "test_deployment"
+    input_params = test_case["input_params"]
+    expected_output = test_case["expected_output"]
+
+    mock_func1.return_value = input_params["memory_history"]
+    mock_func2.return_value = None
+    mock_func3.return_value = 0
+
+    if "runtime" in input_params:
+        mock_func2.return_value = input_params["runtime"]
+    if "oom_killed" in input_params:
+        mock_func3.return_value = input_params["oom_killed"]
 
     # Call the function under test
     result = main.calculate_memory_limits(
-        namespace_name, deployment_name, "development", "nginx", test_case["request"]
+        namespace_name,
+        deployment_name,
+        "development",
+        "nginx",
+        input_params["target_replicas"],
+        main.DEFAULT_LOOKBACK_MINUTES,
     )
 
-    # Verify that the function behaves as expected
-    assert result == test_case["limit"]
+    assert result == pytest.approx(expected_output, rel=1e-2)
