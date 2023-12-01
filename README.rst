@@ -254,13 +254,13 @@ MEMORY_LIMIT_RATIO
 MIN_MEMORY_LIMIT
 -------------------
 
-- Default: Calculated based on MEMORY_LIMIT_RATIO and MIN_MEMORY_REQUEST.
+- Default: `16 MB` (1024**2 * 16)
 - Description: Minimum memory limit value in bytes.
 
 MAX_MEMORY_LIMIT
 -------------------
 
-- Default: Calculated based on MEMORY_LIMIT_RATIO and MAX_MEMORY_REQUEST.
+- Default: `16 GB` (1024**3 * 16)
 - Description: Maximum memory limit value in bytes.
 
 CHANGE_THRESHOLD
