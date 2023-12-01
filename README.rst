@@ -50,25 +50,33 @@ This tool can run once or on a regular schedule (eg. every 2 oder 4 hours) and w
 Features
 --------
 
+- Supports static and dynamic deployments (hpa)
+    - static deployments get more resources assigned because they cannot scale out
+    - dynamic deployments get less resources assigned because they can scale out
+- Support for cpu and memory resources
+    - The CPU requests are calculated based on a specified percentile of the sum of CPU allocations across all pods.
+    - Memory requests are determined by a specified percentile of memory usage, calculated from the average memory utilization across all pods.
+    - Memory limits are set based on a specified percentile of memory usage, derived from the maximum memory utilization across all pods.
 - Analyze historical resource utilization data using prometheus as a data source
     - Queries based on quantile over time which can be adjusted
     - Look back one week and predict the resource utilization for the hours
     - Look back 4 hours and compared it to one week ago to get a trend
 - Automatically adjust deployment requests
-    - Increase memory request and limits if discoverd oom kiils
-    - Limit requests to 1 core for nodejs applications
-    - Remove requests all cpu limits (see https://home.robusta.dev/blog/stop-using-cpu-limits)
-    - Support for various thresholds and settings (see configuration)
-- Highly tested code using pytest framework
-- Can run as docker image
-- Supports environment variables for configuration
+    - Increases memory requests and limits upon discovering OOM kills.
+    - Caps requests to 1 core for Node.js applications.
+    - Eliminates CPU limits following best practices (see https://home.robusta.dev/blog/stop-using-cpu-limits)
+    - Provides flexibility with various thresholds and configurable settings. (see configuration)
+- Highly tested code using the Pytest framework.
+- Can be executed as a Docker image.
+- Supports configuration through environment variables.
 
 Differences between VPA
 --------
 
 - Supports running together wtih hpa (they won't fight each other)
 - Supports lower memory requests (there is no 256MB minimum)
-- Supports normalized utilization
+- Forecasts todays with data from one week ago in order to account for different usage pattern based on weekdays
+- Compares the last 4 hours with data from the last 4 hours a week ago in order to detect a trend
 - Updates the deployment object instead of the crated pod
 - Can run as a cli command outside of the cluster
 
@@ -76,9 +84,6 @@ Known issues
 --------
 
 - Flux or other management might rollback the changes
-- Change of CPU_REQUEST_RATIO or MEMORY_REQUEST_RATIO will only work if hpa is not used with the corresponding metric
-    - if you want to have more cpu headroom in a hpa usecase ensure that the target average utilization is set to a lower value like 80% or less
-    - if you want to have more memory headroom in a hpa usecase ensure that the target average utilization is set to a lower value like 80% or less
 
 Future ideas
 --------
@@ -111,6 +116,9 @@ Quickstart
 
     python3 src/k8soptimizer/main.py -n default -v --dry-run
 
+    # Modify the configuration to your needs
+    export NAMESPACE_PATTERN="default"
+
 
 Configuration
 =============
@@ -136,139 +144,187 @@ DEPLOYMENT_PATTERN
 - Description: A regular expression pattern to filter deployments for optimization.
 
 CONTAINER_PATTERN
-------------------
+-------------------
 
 - Default: `.*`
-- Description: A regular expression pattern to filter containers for optimization.
+- Description: A regular expression pattern to filter container names for optimization.
 
-CREATE_AGE_THRESHOLD
----------------------
+PROMETHEUS_URL
+-------------------
 
-- Default: `60`
-- Description: The threshold (in minutes) for considering a new deployment for optimization.
-
-UPDATE_AGE_THRESHOLD
----------------------
-
-- Default: `60`
-- Description: The threshold (in minutes) for considering an updated deployment for optimization.
-
-MIN_LOOKBACK_MINUTES
----------------------
-
-- Default: `30`
-- Description: The minimum lookback time (in minutes) for historical data.
-
-MAX_LOOKBACK_MINUTES
----------------------
-
-- Default: `2592000` (30 days)
-- Description: The maximum lookback time (in minutes) for historical data.
-
-OFFSET_LOOKBACK_MINUTES
------------------------
-
-- Default: `5`
-- Description: The offset applied to the lookback time (in minutes).
+- Default: `http://localhost:9090`
+- Description: The URL for the Prometheus server.
 
 DEFAULT_LOOKBACK_MINUTES
-------------------------
+-------------------
 
-- Default: `604800` (7 days)
-- Description: The default lookback time (in minutes) for historical data.
+- Default: `240` (4 hours)
+- Description: The default lookback time in minutes for queries.
+
+DEFAULT_OFFSET_MINUTES
+-------------------
+
+- Default: Computed based on a week minus DEFAULT_LOOKBACK_MINUTES.
+- Description: The default offset in minutes for queries.
 
 DEFAULT_QUANTILE_OVER_TIME
---------------------------
+-------------------
 
 - Default: `0.95`
-- Description: The default quantile used when querying metrics over time. (max value is 1.0, a higher value will result in higher resource requests)
+- Description: The default quantile value for queries. A higher value will result in more resources being allocated.
+
+DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU
+-------------------
+
+- Default: `0.95`
+- Description: Default quantile value for CPU static configurations. A higher value will result in more resources being allocated.
+
+DEFAULT_QUANTILE_OVER_TIME_HPA_CPU
+-------------------
+
+- Default: `0.7`
+- Description: Default quantile value for CPU Horizontal Pod Autoscaler (HPA). A higher value will result in more resources being allocated.
+
+DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY
+-------------------
+
+- Default: `0.95`
+- Description: Default quantile value for memory static configurations. A higher value will result in more resources being allocated.
+
+DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY
+-------------------
+
+- Default: `0.8`
+- Description: Default quantile value for memory Horizontal Pod Autoscaler (HPA). A higher value will result in more resources being allocated.
 
 DRY_RUN_MODE
-------------
+-------------------
 
 - Default: `False`
-- Description: If set to `True`, the tool will run in dry-run mode and only simulate changes.
+- Description: Flag for dry run mode.
 
 MIN_CPU_REQUEST
----------------
+-------------------
 
 - Default: `0.010`
-- Description: The minimum CPU request value (below `10m` may not work reliably with HPA).
+- Description: Minimum CPU request value.
 
 MAX_CPU_REQUEST
----------------
+-------------------
 
 - Default: `16`
-- Description: The maximum CPU request value.
+- Description: Maximum CPU request value.
 
 MAX_CPU_REQUEST_NODEJS
-----------------------
+-------------------
 
 - Default: `1.0`
-- Description: The maximum CPU request value for Node.js applications.
+- Description: Maximum CPU request value specifically for Node.js.
 
 CPU_REQUEST_RATIO
 -------------------
 
 - Default: `1.0`
-- Description: The ratio used to calculate cpu requests. (changing this might break the normalized utilization calculation and will cause problems with hpa)
+- Description: CPU request ratio. Increase this value to allocate more CPU resources than historical usage.
 
 MIN_MEMORY_REQUEST
 -------------------
 
-- Default: `16777216` (16 MiB)
-- Description: The minimum memory request value (in bytes).
+- Default: `16 MB` (1024**2 * 16)
+- Description: Minimum memory request value in bytes.
 
 MAX_MEMORY_REQUEST
 -------------------
 
-- Default: `17179869184` (16 GiB)
-- Description: The maximum memory request value (in bytes).
+- Default: `16 GB` (1024**3 * 16)
+- Description: Maximum memory request value in bytes.
 
 MEMORY_REQUEST_RATIO
 -------------------
 
-- Default: `1.0`
-- Description: The ratio used to calculate memory requests. (changing this might break the normalized utilization calculation and will cause problems with hpa)
+- Default: `1.5`
+- Description: Memory request ratio. Increase this value to allocate more memory resources than historical usage.
 
 MEMORY_LIMIT_RATIO
 -------------------
 
-- Default: `1.5`
-- Description: The ratio used to calculate memory limits based on memory requests.
+- Default: `2.0`
+- Description: Memory limit ratio. Increase this value to allow more memory resources than historical usage.
 
 MIN_MEMORY_LIMIT
------------------
+-------------------
 
-- Default: Calculated based on `MIN_MEMORY_REQUEST` and `MEMORY_LIMIT_RATIO`.
-- Description: The minimum memory limit value (in bytes).
+- Default: Calculated based on MEMORY_LIMIT_RATIO and MIN_MEMORY_REQUEST.
+- Description: Minimum memory limit value in bytes.
 
 MAX_MEMORY_LIMIT
------------------
+-------------------
 
-- Default: Calculated based on `MAX_MEMORY_REQUEST` and `MEMORY_LIMIT_RATIO`.
-- Description: The maximum memory limit value (in bytes).
+- Default: Calculated based on MEMORY_LIMIT_RATIO and MAX_MEMORY_REQUEST.
+- Description: Maximum memory limit value in bytes.
 
 CHANGE_THRESHOLD
-----------------
+-------------------
 
 - Default: `0.1`
-- Description: The threshold used to determine if a change in resources is significant.
+- Description: Threshold for change.
 
-HPA_THRESHOLD
-----------------
+HPA_TARGET_REPLICAS_RATIO
+-------------------
+
+- Default: `0.1`
+- Description: Ratio for Horizontal Pod Autoscaler (HPA) target replicas. This value is limited by the hpa min and max settings. A setting of 0 would result in having only min pods running, a setting of 1 would result in having max pods running.
+
+HPA_MIN_REPLICAS
+-------------------
+
+- Default: `1`
+- Description: Minimum replicas for Horizontal Pod Autoscaler (HPA).
+
+HPA_MAX_REPLICAS
+-------------------
+
+- Default: `100`
+- Description: Maximum replicas for Horizontal Pod Autoscaler (HPA).
+
+TREND_LOOKBOOK_MINUTES
+-------------------
+
+- Default: `240` (4 hours)
+- Description: Trend lookback time in minutes.
+
+TREND_OFFSET_MINUTES
+-------------------
+
+- Default: `10080` (7 days)
+- Description: Trend offset in minutes.
+
+TREND_MAX_RATIO
+-------------------
+
+- Default: `1.5`
+- Description: Maximum ratio for trends.
+
+TREND_MIN_RATIO
+-------------------
 
 - Default: `0.5`
-- Description: The threshold used to determine if a the current number of replicas is near the limit (1.0 is max = limit reached, 0.0 is min = min_relpicas).
+- Description: Minimum ratio for trends.
+
+TREND_QUANTILE_OVER_TIME
+-------------------
+
+- Default: `0.8`
+- Description: Quantile value for trends.
 
 LOG_LEVEL
-----------------
+-------------------
 
-- Default: `info`
-- Description: The loglevel used for all logging.
+- Default: `INFO`
+- Description: Logging level.
 
 LOG_FORMAT
-----------------
+-------------------
 
 - Default: `json`
-- Description: The logformat used for all logging.
+- Description: Logging format.
