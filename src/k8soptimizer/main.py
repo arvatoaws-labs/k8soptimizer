@@ -58,28 +58,23 @@ DEPLOYMENT_PATTERN = os.getenv("DEPLOYMENT_PATTERN", ".*")
 CONTAINER_PATTERN = os.getenv("CONTAINER_PATTERN", ".*")
 
 # in minutes
-CREATE_AGE_THRESHOLD = int(os.getenv("CREATE_AGE_THRESHOLD", 60))
 # cannot not be less than 5 minutes)
-UPDATE_AGE_THRESHOLD = int(os.getenv("UPDATE_AGE_THRESHOLD", 60))
-MIN_LOOKBACK_MINUTES = int(os.getenv("MIN_LOOKBACK_MINUTES", 30))
-MAX_LOOKBACK_MINUTES = int(os.getenv("MAX_LOOKBACK_MINUTES", 60 * 24 * 30))
-OFFSET_LOOKBACK_MINUTES = int(os.getenv("OFFSET_LOOKBACK_MINUTES", 5))
 
-DEFAULT_OFFSET_MINUTES = int(os.getenv("DEFAULT_OFFSET_MINUTES", 60 * 4))
-DEFAULT_LOOKBACK_MINUTES = int(
-    os.getenv("DEFAULT_LOOKBACK_MINUTES", (60 * 24 * 7) - (60 * 4))
+DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 60 * 4))
+DEFAULT_OFFSET_MINUTES = int(
+    os.getenv("DEFAULT_OFFSET_MINUTES", (60 * 24 * 7) - (DEFAULT_LOOKBACK_MINUTES))
 )
 DEFAULT_QUANTILE_OVER_TIME = float(os.getenv("DEFAULT_QUANTILE_OVER_TIME", 0.95))
 
 DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU = float(
-    os.getenv("DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU", 0.9)
+    os.getenv("DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU", 0.95)
 )
 DEFAULT_QUANTILE_OVER_TIME_HPA_CPU = float(
-    os.getenv("DEFAULT_QUANTILE_OVER_TIME_HPA_CPU", 0.5)
+    os.getenv("DEFAULT_QUANTILE_OVER_TIME_HPA_CPU", 0.7)
 )
 
 DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY = float(
-    os.getenv("DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY", 0.9)
+    os.getenv("DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY", 0.95)
 )
 DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY = float(
     os.getenv("DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY", 0.8)
@@ -96,8 +91,8 @@ MAX_CPU_REQUEST_NODEJS = 1.0
 CPU_REQUEST_RATIO = float(os.getenv("CPU_REQUEST_RATIO", 1.0))
 MIN_MEMORY_REQUEST = int(os.getenv("MIN_MEMORY_REQUEST", 1024**2 * 16))
 MAX_MEMORY_REQUEST = int(os.getenv("MAX_MEMORY_REQUEST", 1024**3 * 16))
-MEMORY_REQUEST_RATIO = float(os.getenv("MEMORY_REQUEST_RATIO", 1.0))
-MEMORY_LIMIT_RATIO = float(os.getenv("MEMORY_LIMIT_RATIO", 1.5))
+MEMORY_REQUEST_RATIO = float(os.getenv("MEMORY_REQUEST_RATIO", 1.5))
+MEMORY_LIMIT_RATIO = float(os.getenv("MEMORY_LIMIT_RATIO", 2.0))
 MIN_MEMORY_LIMIT = int(
     os.getenv("MIN_MEMORY_LIMIT", MIN_MEMORY_REQUEST * MEMORY_LIMIT_RATIO)
 )
@@ -105,9 +100,15 @@ MAX_MEMORY_LIMIT = int(
     os.getenv("MAX_MEMORY_LIMIT", MAX_MEMORY_REQUEST * MEMORY_LIMIT_RATIO)
 )
 CHANGE_THRESHOLD = os.getenv("CHANGE_THRESHOLD", 0.1)
-HPA_TARGET_REPLICAS_RATIO = float(os.getenv("HPA_TARGET_REPLICAS_RATIO", 1))
+HPA_TARGET_REPLICAS_RATIO = float(os.getenv("HPA_TARGET_REPLICAS_RATIO", 0.1))
 HPA_MIN_REPLICAS = int(os.getenv("HPA_MIN_REPLICAS", 1))
 HPA_MAX_REPLICAS = int(os.getenv("HPA_MAX_REPLICAS", 100))
+
+TREND_LOOKBOOK_MINUTES = int(os.getenv("TREND_LOOKBOOK_MINUTES", 60 * 4))
+TREND_OFFSET_MINUTES = int(os.getenv("TREND_OFFSET_MINUTES", (60 * 24 * 7)))
+TREND_MAX_RATIO = float(os.getenv("TREND_MAX_RATIO", 1.5))
+TREND_MIN_RATIO = float(os.getenv("TREND_MIN_RATIO", 0.5))
+TREND_QUANTILE_OVER_TIME = float(os.getenv("TREND_QUANTILE_OVER_TIME", 0.8))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "json").lower()
@@ -590,12 +591,78 @@ def calculate_target_replicas(deployment: V1Deployment) -> int:
         _logger.info("Hpa not found for: %s" % deployment.metadata.name)
         return deployment.spec.replicas
 
+    targets = hpa.spec.max_replicas * HPA_TARGET_REPLICAS_RATIO
+
     return round(
         max(
-            HPA_MIN_REPLICAS,
-            min(HPA_MAX_REPLICAS, hpa.spec.min_replicas * HPA_TARGET_REPLICAS_RATIO),
+            hpa.spec.min_replicas,
+            min(hpa.spec.max_replicas, targets),
         )
     )
+
+
+@beartype
+def calculate_cpu_trend(
+    namespace_name: str,
+    workload: str,
+    workload_type: str,
+    container_name: str,
+    lookback_minutes: int = TREND_LOOKBOOK_MINUTES,
+    offset_minutes: int = TREND_OFFSET_MINUTES,
+    quantile_over_time: float = TREND_QUANTILE_OVER_TIME,
+) -> float:
+    """
+    Calculate the CPU requests for a specific container based on historical data compared to today
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., myapp).
+        workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
+        container_name (str): The name of the container.
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+        offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
+        quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+
+    Returns:
+        float: The calculated CPU requests.
+
+    Example:
+        cpu_requests = calculate_cpu_trend("my-namespace", "my-workload", "deployment", "my-container", 1.5, 60)
+    """
+
+    cpu_today = get_cpu_cores_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        0,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_cpu_cores_sum",
+    )
+
+    cpu_weekago = get_cpu_cores_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        offset_minutes,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_cpu_cores_sum",
+    )
+
+    trend = round(cpu_today / cpu_weekago, 3)
+
+    _logger.debug("CPU trend raw: %s" % trend)
+
+    trend = max(
+        TREND_MIN_RATIO, min(TREND_MAX_RATIO, round(cpu_today / cpu_weekago, 3))
+    )
+
+    _logger.debug("CPU trend limited: %s" % trend)
+
+    return float(trend)
 
 
 @beartype
@@ -629,31 +696,28 @@ def calculate_cpu_requests(
         cpu_requests = calculate_cpu_requests("my-namespace", "my-workload", "deployment", "my-container", 1.5, 60)
     """
 
-    # Annahme
-    # 10 history cores
-    # target replicas 3
-    # 10 / 3 = 3.33
-    # max 1
-    # min 0.1
-    # expected relicas 10
+    trend = calculate_cpu_trend(namespace_name, workload, workload_type, container_name)
+
+    history = get_cpu_cores_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        offset_minutes,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_cpu_cores_sum",
+    )
+
+    _logger.debug("CPU trend: %s" % trend)
+    _logger.debug("CPU history: %s" % history)
 
     new_cpu = round(
         max(
             MIN_CPU_REQUEST,
             min(
                 MAX_CPU_REQUEST,
-                get_cpu_cores_usage_history(
-                    namespace_name,
-                    workload,
-                    container_name,
-                    workload_type,
-                    lookback_minutes,
-                    offset_minutes,
-                    quantile_over_time,
-                    "kube_workload_container_resource_usage_cpu_cores_sum",
-                )
-                / target_replicas
-                * CPU_REQUEST_RATIO,
+                history / target_replicas * trend * CPU_REQUEST_RATIO,
             ),
         ),
         3,
@@ -666,6 +730,71 @@ def calculate_cpu_requests(
         new_cpu = min(MAX_CPU_REQUEST_NODEJS, new_cpu)
 
     return float(new_cpu)
+
+
+@beartype
+def calculate_memory_trend(
+    namespace_name: str,
+    workload: str,
+    workload_type: str,
+    container_name: str,
+    lookback_minutes: int = TREND_LOOKBOOK_MINUTES,
+    offset_minutes: int = TREND_OFFSET_MINUTES,
+    quantile_over_time: float = TREND_QUANTILE_OVER_TIME,
+):
+    """
+    Calculate the memory requests for a specific container based on historical data, target ratio, and OOM history.
+
+    Args:
+        namespace_name (str): The name of the Kubernetes namespace.
+        workload (str): The name of the workload (e.g., myapp).
+        workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
+        container_name (str): The name of the container.
+        target_replicas (float): The target replica count.
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+        offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
+        quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+
+    Returns:
+        int: The calculated memory requests in bytes.
+
+    Example:
+        memory_requests = calculate_memory_requests("my-namespace", "my-workload", "deployment", "my-container", 1.5, 60)
+    """
+
+    memory_today = get_memory_bytes_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        0,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_memory_bytes_avg",
+    )
+
+    memory_weekago = get_memory_bytes_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        offset_minutes,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_memory_bytes_avg",
+    )
+
+    trend = round(memory_today / memory_weekago, 3)
+
+    _logger.debug("Memory trend raw: %s" % trend)
+
+    trend = max(
+        TREND_MIN_RATIO, min(TREND_MAX_RATIO, round(memory_today / memory_weekago, 3))
+    )
+
+    _logger.debug("Memory trend limited: %s" % trend)
+
+    return float(trend)
 
 
 @beartype
@@ -698,6 +827,7 @@ def calculate_memory_requests(
     Example:
         memory_requests = calculate_memory_requests("my-namespace", "my-workload", "deployment", "my-container", 1.5, 60)
     """
+    oom_ratio = 1
     if (
         get_oom_killed_history(
             namespace_name, workload, container_name, workload_type, lookback_minutes
@@ -705,23 +835,29 @@ def calculate_memory_requests(
         > 0
     ):
         quantile_over_time = 0.99
+        oom_ratio = 1.5
+
+    trend = calculate_memory_trend(
+        namespace_name, workload, workload_type, container_name
+    )
+
+    history = get_memory_bytes_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        offset_minutes,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_memory_bytes_avg",
+    )
 
     new_memory = round(
         max(
             MIN_MEMORY_REQUEST,
             min(
                 MAX_MEMORY_REQUEST,
-                get_memory_bytes_usage_history(
-                    namespace_name,
-                    workload,
-                    container_name,
-                    workload_type,
-                    lookback_minutes,
-                    offset_minutes,
-                    quantile_over_time,
-                    "kube_workload_container_resource_usage_memory_bytes_avg",
-                )
-                * MEMORY_REQUEST_RATIO,
+                history * trend * oom_ratio * MEMORY_REQUEST_RATIO,
             ),
         )
     )
@@ -738,6 +874,7 @@ def calculate_memory_limits(
     target_replicas: int = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     offset_minutes: int = DEFAULT_LOOKBACK_MINUTES,
+    quantile_over_time: float = 0.99,
 ) -> int:
     """
     Calculate the memory limits for a specific container based on memory requests.
@@ -758,23 +895,37 @@ def calculate_memory_limits(
     Example:
         memory_limits = calculate_memory_limits("my-namespace", "my-workload", "deployment", "my-container", 2048)
     """
+    oom_ratio = 1
+    if (
+        get_oom_killed_history(
+            namespace_name, workload, container_name, workload_type, lookback_minutes
+        )
+        > 0
+    ):
+        quantile_over_time = 0.99
+        oom_ratio = 2
+
+    trend = calculate_memory_trend(
+        namespace_name, workload, workload_type, container_name
+    )
+
+    history = get_memory_bytes_usage_history(
+        namespace_name,
+        workload,
+        container_name,
+        workload_type,
+        lookback_minutes,
+        offset_minutes,
+        quantile_over_time,
+        "kube_workload_container_resource_usage_memory_bytes_max",
+    )
 
     new_memory = round(
         max(
             MIN_MEMORY_LIMIT,
             min(
                 MAX_MEMORY_LIMIT,
-                get_memory_bytes_usage_history(
-                    namespace_name,
-                    workload,
-                    container_name,
-                    workload_type,
-                    lookback_minutes,
-                    offset_minutes,
-                    0.99,
-                    "kube_workload_container_resource_usage_memory_bytes_max",
-                )
-                * MEMORY_LIMIT_RATIO,
+                history * trend * oom_ratio * MEMORY_LIMIT_RATIO,
             ),
         )
     )
@@ -1003,13 +1154,12 @@ def optimize_deployment(
     old_resources = get_resources_from_deployment(deployment)
     lookback_minutes = DEFAULT_LOOKBACK_MINUTES
     offset_minutes = DEFAULT_OFFSET_MINUTES
-    _logger.debug("Lookback minutes: %s" % lookback_minutes)
-    _logger.debug("Offset minutes: %s" % offset_minutes)
-
     target_replicas = calculate_target_replicas(deployment)
     target_quantile_over_time = calculate_quantile_over_time(
         namespace_name, deployment_name
     )
+
+    _logger.info("Target replicas: %s" % target_replicas)
 
     _logger.debug(
         "target_quantile_over_time cpu: %s" % target_quantile_over_time["cpu"]
@@ -1150,11 +1300,18 @@ def optimize_container(
         offset_minutes,
     )
 
-    current_replicas = 1
-    stats["old_cpu_sum"] += old_cpu * current_replicas
-    stats["new_cpu_sum"] += new_cpu * current_replicas
-    stats["old_memory_sum"] += old_memory * current_replicas
-    stats["new_memory_sum"] += new_memory * current_replicas
+    if changed_cpu:
+        stats["new_cpu_sum"] += new_cpu * target_repliacs
+    else:
+        stats["new_cpu_sum"] += old_cpu * target_repliacs
+
+    if changed_memory:
+        stats["new_memory_sum"] += new_memory * target_repliacs
+    else:
+        stats["new_memory_sum"] += old_memory * target_repliacs
+
+    stats["old_cpu_sum"] += old_cpu * target_repliacs
+    stats["old_memory_sum"] += old_memory * target_repliacs
 
     container.resources.requests["cpu"] = str(round(new_cpu * 1000)) + "m"
     if "cpu" in container.resources.limits:
@@ -1672,6 +1829,10 @@ def main(args):
     _logger.info("Using lookback_minutes: {}".format(lookback_minutes))
     _logger.info("Using offset_minutes: {}".format(offset_minutes))
     _logger.info("Using dry_run: {}".format(args.dry_run))
+    _logger.info("Using cpu request ratio: %s" % CPU_REQUEST_RATIO)
+    _logger.info("Using memory request ratio: %s" % MEMORY_REQUEST_RATIO)
+    _logger.info("Using memory limit ratio: %s" % MEMORY_LIMIT_RATIO)
+    _logger.info("Using hpa target replicas ratio: %s" % HPA_TARGET_REPLICAS_RATIO)
 
     for namespace in get_namespaces(namespace_pattern).items:
         extra = {"namespace": namespace.metadata.name}

@@ -44,22 +44,18 @@ Description
 
 Optimizing Kubernetes resource management has never been more efficient! *k8soptimizer* empowers you to fine-tune your deployments, ensuring optimal performance and resource allocation. Leverage Prometheus metrics to make data-driven decisions, dynamically adjusting resource requests and limits for unprecedented efficiency.
 
+This tool can run once or on a regular schedule (eg. every 2 oder 4 hours) and will adjust the resource requests and limits of your deployments based on the historical resource utilization data from prometheus.
+
 
 Features
 --------
 
 - Analyze historical resource utilization data using prometheus as a data source
-    - Dynamic lookback time based on deployment age and last optimization
     - Queries based on quantile over time which can be adjusted
+    - Look back one week and predict the resource utilization for the hours
+    - Look back 4 hours and compared it to one week ago to get a trend
 - Automatically adjust deployment requests
-    - Use hpa average_utilization setting to calculate a normalized utilization
-        - Scenario 1: 10 pods requesting 0.8 cores and consuming 0.8 cores with 80% HPA average_utilization results in 100% normalized utilization.
-        - Scenario 2: 10 pods requesting 1 core and consuming 0.5 cores with 80% HPA average_utilization results in 62.5% normalized utilization.
-        - Scenario 3: 10 pods requesting 1 core and consuming 1 core with 100% HPA average_utilization results in 100% normalized utilization.
-        - Scenario 4: 10 pods requesting 1 core and consuming 1 core with 100% HPA average_utilization results in 50% normalized utilization.
-    - Increase requests if hpa limit is almost reached
-        - Example: In Scenario 1, where HPA limits are (min=1, max=10, current=10), and the deployment requests 0.5 cores while consuming 0.5 cores, the CPU core request is increased to 1 to stay below the maximum replicas.
-    - Increase memory request if discoverd oom kiils
+    - Increase memory request and limits if discoverd oom kiils
     - Limit requests to 1 core for nodejs applications
     - Remove requests all cpu limits (see https://home.robusta.dev/blog/stop-using-cpu-limits)
     - Support for various thresholds and settings (see configuration)

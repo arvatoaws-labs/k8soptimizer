@@ -484,16 +484,16 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": main.MIN_MEMORY_REQUEST + 1024,
-            "memory_ratio": 1.0,
+            "target_replicas": 1,
             "runtime": None,
         },
-        "expected_output": main.MIN_MEMORY_REQUEST + 1024,
+        "expected_output": (main.MIN_MEMORY_REQUEST + 1024) * main.MEMORY_REQUEST_RATIO,
     },
     # Test case 1: Below min memory
     {
         "input_params": {
             "memory_history": 0.000001,
-            "memory_ratio": 1.0,
+            "target_replicas": 1,
             "runtime": None,
         },
         "expected_output": main.MIN_MEMORY_REQUEST,
@@ -502,7 +502,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": 1,
-            "memory_ratio": 000000.1,
+            "target_replicas": 1,
             "runtime": None,
         },
         "expected_output": main.MIN_MEMORY_REQUEST,
@@ -511,7 +511,7 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": 999999999999999,
-            "memory_ratio": 1.0,
+            "target_replicas": 1,
             "runtime": None,
         },
         "expected_output": main.MAX_MEMORY_REQUEST,
@@ -519,8 +519,8 @@ test_data_memory = [
     # Test case 4: Higher max memory
     {
         "input_params": {
-            "memory_history": 1,
-            "memory_ratio": 999999999999999.0,
+            "memory_history": 999999999999999,
+            "target_replicas": 999999999999999,
             "runtime": None,
         },
         "expected_output": main.MAX_MEMORY_REQUEST,
@@ -528,8 +528,8 @@ test_data_memory = [
     # Test case 5: nodejs
     {
         "input_params": {
-            "memory_history": 10,
-            "memory_ratio": 999999999999999.0,
+            "memory_history": 999999999999999,
+            "target_replicas": 10,
             "runtime": "nodejs",
         },
         "expected_output": main.MAX_MEMORY_REQUEST,
@@ -538,11 +538,13 @@ test_data_memory = [
     {
         "input_params": {
             "memory_history": main.MIN_MEMORY_REQUEST + 1024,
-            "memory_ratio": 1.0,
+            "target_replicas": 1,
             "runtime": None,
             "oom_killed": 11,
         },
-        "expected_output": (main.MIN_MEMORY_REQUEST + 1024) * 2,
+        "expected_output": (main.MIN_MEMORY_REQUEST + 1024)
+        * 1.5
+        * main.MEMORY_REQUEST_RATIO,
     },
 ]
 
@@ -572,7 +574,7 @@ def test_calculate_memory_requests(mock_func1, mock_func2, mock_func3, test_case
         deployment_name,
         "development",
         "nginx",
-        input_params["memory_ratio"],
+        input_params["target_replicas"],
         main.DEFAULT_LOOKBACK_MINUTES,
     )
 
@@ -708,7 +710,6 @@ def test_get_resources_from_deployment():
 
 @patch("k8soptimizer.main.client.AppsV1Api.patch_namespaced_deployment")
 @patch("k8soptimizer.main.calculate_lookback_minutes_from_deployment")
-@patch("k8soptimizer.main.calculate_hpa_target_ratio")
 @patch("k8soptimizer.main.optimize_container")
 def test_optimize_deployment(mock_func1, mock_func2, mock_func3, mock_func4):
     deployment1_input = V1Deployment(
@@ -778,8 +779,7 @@ def test_optimize_deployment(mock_func1, mock_func2, mock_func3, mock_func4):
 
     mock_func1.return_value = deployment1_output, True
     mock_func2.return_value = {"cpu": 2, "memory": 2}
-    mock_func3.return_value = 60
-    mock_func4.return_value = True
+    mock_func3.return_value = True
 
     result = main.optimize_deployment(deployment1_input)
 
