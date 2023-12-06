@@ -1,0 +1,180 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: k8soptimizer
+spec:
+  schedule: "0 */4 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: k8soptimizer
+              image: ghcr.io/arvatoaws-labs/k8soptimizer:dev
+              imagePullPolicy: Always
+              env:
+                - name: CLUSTER_RUN_MODE
+                  value: "true"
+                - name: LOG_LEVEL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: LOG_LEVEL
+                - name: LOG_FORMAT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: LOG_FORMAT
+                - name: DRY_RUN_MODE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DRY_RUN_MODE
+                - name: PROMETHEUS_URL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: PROMETHEUS_URL
+                - name: NAMESPACE_PATTERN
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: NAMESPACE_PATTERN
+                - name: DEPLOYMENT_PATTERN
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEPLOYMENT_PATTERN
+                - name: CONTAINER_PATTERN
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: CONTAINER_PATTERN
+                - name: DEFAULT_LOOKBACK_MINUTES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_LOOKBACK_MINUTES
+                - name: DEFAULT_OFFSET_MINUTES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_OFFSET_MINUTES
+                - name: DEFAULT_QUANTILE_OVER_TIME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_QUANTILE_OVER_TIME
+                - name: DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU
+                - name: DEFAULT_QUANTILE_OVER_TIME_HPA_CPU
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_QUANTILE_OVER_TIME_HPA_CPU
+                - name: DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY
+                - name: DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY
+                - name: MIN_CPU_REQUEST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MIN_CPU_REQUEST
+                - name: MAX_CPU_REQUEST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MAX_CPU_REQUEST
+                - name: MAX_CPU_REQUEST_NODEJS
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MAX_CPU_REQUEST_NODEJS
+                - name: CPU_REQUEST_RATIO
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: CPU_REQUEST_RATIO
+                - name: MIN_MEMORY_REQUEST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MIN_MEMORY_REQUEST
+                - name: MAX_MEMORY_REQUEST
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MAX_MEMORY_REQUEST
+                - name: MEMORY_REQUEST_RATIO
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MEMORY_REQUEST_RATIO
+                - name: MEMORY_LIMIT_RATIO
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MEMORY_LIMIT_RATIO
+                - name: MIN_MEMORY_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MIN_MEMORY_LIMIT
+                - name: MAX_MEMORY_LIMIT
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: MAX_MEMORY_LIMIT
+                - name: CHANGE_THRESHOLD
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: CHANGE_THRESHOLD
+                - name: HPA_TARGET_REPLICAS_RATIO
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: HPA_TARGET_REPLICAS_RATIO
+                - name: TREND_LOOKBOOK_MINUTES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: TREND_LOOKBOOK_MINUTES
+                - name: TREND_OFFSET_MINUTES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: TREND_OFFSET_MINUTES
+                - name: TREND_MAX_RATIO
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: TREND_MAX_RATIO
+                - name: TREND_MIN_RATIO
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: TREND_MIN_RATIO
+                - name: TREND_QUANTILE_OVER_TIME
+                  valueFrom:
+                    configMapKeyRef:
+                      name: env-config
+                      key: TREND_QUANTILE_OVER_TIME
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: "256Mi"
+                limits:
+                  memory: "1Gi"
+          restartPolicy: Never
+          serviceAccountName: k8soptimizer

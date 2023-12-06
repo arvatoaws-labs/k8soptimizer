@@ -74,11 +74,11 @@ Differences between VPA
 --------
 
 - Supports running together wtih hpa (they won't fight each other)
-- Supports lower memory requests (there is no 256MB minimum)
+- Supports lower memory requests (there is no 256MB minimum as default)
 - Forecasts todays with data from one week ago in order to account for different usage pattern based on weekdays
 - Compares the last 4 hours with data from the last 4 hours a week ago in order to detect a trend
 - Updates the deployment object instead of the crated pod
-- Can run as a cli command outside of the cluster
+- Can also run as a cli command outside of the cluster
 
 Known issues
 --------
@@ -95,12 +95,13 @@ Future ideas
 - Support for kubernetes events (to see oom kills and others useful events)
 - Store recommendations in a configmap and use it for helm deployment
 - Dynamic configuration based on namespace or object annotations
-- Admission Controller mode
+- Admission controller mode
 - Better logging and alerting
 
 Quickstart
 ==========
 
+    # cli mode
 
     # install prometheus operator
 
@@ -118,6 +119,24 @@ Quickstart
 
     # Modify the configuration to your needs
     export NAMESPACE_PATTERN="default"
+
+    # cluster mode
+
+
+    # install rbac permissions
+
+    kubectl apply -f deploy/rbac.yaml
+
+    # modify config.yaml to your needs
+
+    kubectl apply -f deploy/config.yaml
+
+    # deploy the cronjob
+
+    kubectl apply -f deploy/cronjob.yaml
+
+    # trigger the cronjob manually or wait for the next schedule
+    # verify the logs of the cronjob
 
 
 Configuration

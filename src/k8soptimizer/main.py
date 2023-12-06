@@ -1852,6 +1852,8 @@ def main(args):
     """
     args = parse_args(args)
     setup_logging(args.loglevel, args.logformat)
+    extra = {}
+    _logger.addFilter(AppFilter(extra))
     _logger.info("Starting k8soptimizer...")
 
     verify_kubernetes_connection()
