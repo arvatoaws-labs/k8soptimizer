@@ -59,7 +59,6 @@ CONTAINER_PATTERN = os.getenv("CONTAINER_PATTERN", ".*")
 
 # in minutes
 # cannot not be less than 5 minutes)
-
 DEFAULT_LOOKBACK_MINUTES = int(os.getenv("DEFAULT_LOOKBACK_MINUTES", 60 * 4))
 DEFAULT_OFFSET_MINUTES = int(
     os.getenv("DEFAULT_OFFSET_MINUTES", (60 * 24 * 7) - (DEFAULT_LOOKBACK_MINUTES))
@@ -82,6 +81,11 @@ DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY = float(
 
 # operating mode
 DRY_RUN_MODE = os.getenv("DRY_RUN_MODE", "false").lower() in ["true", "1", "yes"]
+CLUSTER_RUN_MODE = os.getenv("CLUSTER_RUN_MODE", "false").lower() in [
+    "true",
+    "1",
+    "yes",
+]
 
 MIN_CPU_REQUEST = float(
     os.getenv("MIN_CPU_REQUEST", 0.010)
@@ -118,6 +122,9 @@ stats["old_cpu_sum"] = 0
 stats["new_cpu_sum"] = 0
 stats["old_memory_sum"] = 0
 stats["new_memory_sum"] = 0
+stats["old_memory_limits_sum"] = 0
+stats["new_memory_limits_sum"] = 0
+
 
 # ---- Python API ----
 # The functions defined in this section can be imported by users in their
@@ -229,7 +236,10 @@ def verify_kubernetes_connection() -> bool:
     Example:
         connection_successful = verify_kubernetes_connection()
     """
-    config.load_kube_config()
+    if CLUSTER_RUN_MODE:
+        config.load_incluster_config()
+    else:
+        config.load_kube_config()
     client.ApisApi().get_api_versions_with_http_info()
     return True
 
@@ -1290,6 +1300,7 @@ def optimize_container(
         offset_minutes,
         target_quantile_over_time_memory,
     )
+    old_memory_limit = get_memory_limits_from_container(container)
     new_memory_limit, changed_memory_limit = optimize_container_memory_limits(
         namespace_name,
         workload,
@@ -1310,8 +1321,14 @@ def optimize_container(
     else:
         stats["new_memory_sum"] += old_memory * target_repliacs
 
+    if changed_memory_limit:
+        stats["new_memory_limits_sum"] += new_memory_limit * target_repliacs
+    else:
+        stats["new_memory_limits_sum"] += old_memory_limit * target_repliacs
+
     stats["old_cpu_sum"] += old_cpu * target_repliacs
     stats["old_memory_sum"] += old_memory * target_repliacs
+    stats["old_memory_limits_sum"] += old_memory_limit * target_repliacs
 
     container.resources.requests["cpu"] = str(round(new_cpu * 1000)) + "m"
     if "cpu" in container.resources.limits:
@@ -1616,11 +1633,8 @@ def optimize_container_memory_limits(
 
 
 def print_stats():
-    if stats["old_cpu_sum"] > 0:
+    if stats["old_cpu_sum"] > 0 and stats["new_cpu_sum"] > 0:
         diff_cpu_sum = round(((stats["new_cpu_sum"] / stats["old_cpu_sum"]) - 1) * 100)
-        diff_memory_sum = round(
-            ((stats["new_memory_sum"] / stats["old_memory_sum"]) - 1) * 100
-        )
 
         _logger.info(
             "Summary cpu requests change: {} -> {} ({}%)".format(
@@ -1630,11 +1644,30 @@ def print_stats():
             )
         )
 
+    if stats["old_memory_sum"] > 0 and stats["new_memory_sum"] > 0:
+        diff_memory_sum = round(
+            ((stats["new_memory_sum"] / stats["old_memory_sum"]) - 1) * 100
+        )
+
         _logger.info(
             "Summary memory requests change: {} -> {} ({}%)".format(
                 str(round(stats["old_memory_sum"] / 1024 / 1024)) + "Mi",
                 str(round(stats["new_memory_sum"] / 1024 / 1024)) + "Mi",
                 diff_memory_sum,
+            )
+        )
+
+    if stats["old_memory_limits_sum"] > 0 and stats["new_memory_limits_sum"] > 0:
+        diff_memory_limits_sum = round(
+            ((stats["new_memory_limits_sum"] / stats["old_memory_limits_sum"]) - 1)
+            * 100
+        )
+
+        _logger.info(
+            "Summary memory limits change: {} -> {} ({}%)".format(
+                str(round(stats["old_memory_limits_sum"] / 1024 / 1024)) + "Mi",
+                str(round(stats["new_memory_limits_sum"] / 1024 / 1024)) + "Mi",
+                diff_memory_limits_sum,
             )
         )
 
