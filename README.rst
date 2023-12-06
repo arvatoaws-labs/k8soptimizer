@@ -275,18 +275,6 @@ HPA_TARGET_REPLICAS_RATIO
 - Default: `0.1`
 - Description: Ratio for Horizontal Pod Autoscaler (HPA) target replicas. This value is limited by the hpa min and max settings. A setting of 0 would result in having only min pods running, a setting of 1 would result in having max pods running.
 
-HPA_MIN_REPLICAS
--------------------
-
-- Default: `1`
-- Description: Minimum replicas for Horizontal Pod Autoscaler (HPA).
-
-HPA_MAX_REPLICAS
--------------------
-
-- Default: `100`
-- Description: Maximum replicas for Horizontal Pod Autoscaler (HPA).
-
 TREND_LOOKBOOK_MINUTES
 -------------------
 

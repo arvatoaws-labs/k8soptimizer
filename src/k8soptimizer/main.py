@@ -186,10 +186,10 @@ def query_prometheus(query: str) -> dict:
     Example:
         response = query_prometheus('sum(rate(http_requests_total{job="api"}[5m]))')
     """
-    _logger.debug(query)
+    _logger.debug("Query to prometheus: %s", query)
     response = requests.get(PROMETHEUS_URL + "/api/v1/query", params={"query": query})
     j = json.loads(response.text)
-    _logger.debug(j)
+    _logger.debug("Response from prometheus: %s", j)
     if "data" not in j:
         raise RuntimeError("Got invalid results from query: {}".format(query))
     if "result" not in j["data"]:
@@ -1460,10 +1460,10 @@ def optimize_container_cpu_requests(
     _logger.debug("Optimizingg container cpu requests: %s" % container_name)
 
     try:
-        _logger.debug(container.resources.requests["cpu"])
         old_cpu = helpers.convert_cpu_request_to_cores(
             container.resources.requests["cpu"]
         )
+        _logger.debug("Current cpu request: %s", old_cpu)
     except (KeyError, AttributeError):
         _logger.info("Could not read old CPU requests aassuming it is 0.001")
         old_cpu = 0.001
@@ -1478,6 +1478,7 @@ def optimize_container_cpu_requests(
         offset_minutes,
         quantile_over_time,
     )
+    _logger.debug("New cpu request: %s", new_cpu)
 
     diff_cpu = round(((new_cpu / old_cpu) - 1) * 100)
     change_too_small = abs(diff_cpu) < CHANGE_THRESHOLD * 100
@@ -1531,13 +1532,13 @@ def optimize_container_memory_requests(
         new_memory = optimize_container_memory_requests(namespace_name, workload, container)
     """
     container_name = container.name
-    _logger.debug("Optimizingg container memory requests: %s" % container_name)
+    _logger.debug("Optimizingg container memory request: %s" % container_name)
 
     try:
-        _logger.debug(container.resources.requests["memory"])
         old_memory = helpers.convert_memory_request_to_bytes(
             container.resources.requests["memory"]
         )
+        _logger.debug("Current memory request: %s", old_memory)
     except (KeyError, AttributeError):
         _logger.info("Could not read old meory requests aassuming it is 1")
         old_memory = 1
@@ -1552,6 +1553,8 @@ def optimize_container_memory_requests(
         offset_minutes,
         quantile_over_time,
     )
+    _logger.debug("New memory request: %s", new_memory)
+
     diff_memory = round(((new_memory / old_memory) - 1) * 100)
     change_too_small = abs(diff_memory) < CHANGE_THRESHOLD * 100
 
@@ -1606,6 +1609,7 @@ def optimize_container_memory_limits(
         old_memory_limit = helpers.convert_memory_request_to_bytes(
             container.resources.limits["memory"]
         )
+        _logger.debug("Current memory limit: %s", old_memory_limit)
     except (KeyError, AttributeError):
         _logger.info("Could not read old meory limits aassuming it is 1")
         old_memory_limit = 1
@@ -1619,6 +1623,8 @@ def optimize_container_memory_limits(
         lookback_minutes,
         offset_minutes,
     )
+
+    _logger.debug("New memory linmit: %s", new_memory_limit)
     diff_memory_limit = round(((new_memory_limit / old_memory_limit) - 1) * 100)
 
     change_too_small = abs(diff_memory_limit) < CHANGE_THRESHOLD * 100
