@@ -8,10 +8,16 @@ spec:
     spec:
       template:
         spec:
+          securityContext:
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 2000
           containers:
             - name: k8soptimizer
               image: ghcr.io/arvatoaws-labs/k8soptimizer:dev
               imagePullPolicy: Always
+              securityContext:
+                allowPrivilegeEscalation: false
               env:
                 - name: CLUSTER_RUN_MODE
                   value: "true"

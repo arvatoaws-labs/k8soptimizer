@@ -3,10 +3,17 @@ kind: Pod
 metadata:
   name: k8soptimizer
 spec:
+  securityContext:
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 2000
   containers:
     - name: k8soptimizer
       image: ghcr.io/arvatoaws-labs/k8soptimizer:dev
+      #command: ["/bin/sh", "-c", "sleep 100000"]
       imagePullPolicy: Always
+      securityContext:
+        allowPrivilegeEscalation: false
       env:
         - name: CLUSTER_RUN_MODE
           value: "true"
@@ -168,7 +175,7 @@ spec:
       resources:
         requests:
           cpu: 100m
-          memory: "1Gi"
+          memory: "256Mi"
         limits:
           memory: "1Gi"
   restartPolicy: Never
