@@ -20,3 +20,5 @@ ENV PROMETHEUS_URL "http://localhost:9090"
 
 # Run app.py when the container launches
 CMD ["python", "-m", "src.k8soptimizer.main"]
+
+USER nobody
