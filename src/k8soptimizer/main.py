@@ -26,6 +26,7 @@ import logging
 import os
 import re
 import sys
+import traceback
 
 import requests
 from beartype import beartype
@@ -105,8 +106,6 @@ MAX_MEMORY_LIMIT = int(
 )
 CHANGE_THRESHOLD = os.getenv("CHANGE_THRESHOLD", 0.1)
 HPA_TARGET_REPLICAS_RATIO = float(os.getenv("HPA_TARGET_REPLICAS_RATIO", 0.1))
-HPA_MIN_REPLICAS = int(os.getenv("HPA_MIN_REPLICAS", 1))
-HPA_MAX_REPLICAS = int(os.getenv("HPA_MAX_REPLICAS", 100))
 
 TREND_LOOKBOOK_MINUTES = int(os.getenv("TREND_LOOKBOOK_MINUTES", 60 * 4))
 TREND_OFFSET_MINUTES = int(os.getenv("TREND_OFFSET_MINUTES", (60 * 24 * 7)))
@@ -562,7 +561,7 @@ def calculate_quantile_over_time(namespace_name: str, deployment_name: str) -> d
 
     hpa = get_hpa_for_deployment(namespace_name, deployment_name)
     if hpa is None:
-        _logger.info("Hpa not found for: %s" % deployment_name)
+        _logger.debug("Hpa not found for: %s" % deployment_name)
         return {
             "cpu": float(target_quantile_cpu),
             "memory": float(target_quantile_memory),
@@ -598,7 +597,7 @@ def calculate_target_replicas(deployment: V1Deployment) -> int:
         deployment.metadata.namespace, deployment.metadata.name
     )
     if hpa is None:
-        _logger.info("Hpa not found for: %s" % deployment.metadata.name)
+        _logger.debug("Hpa not found for: %s" % deployment.metadata.name)
         return deployment.spec.replicas
 
     targets = hpa.spec.max_replicas * HPA_TARGET_REPLICAS_RATIO
@@ -694,7 +693,7 @@ def calculate_cpu_requests(
         workload (str): The name of the workload (e.g., myapp).
         workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
-        target_replicas (float): The target replica count.
+        target_replicas (int): The target replica count.
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
         offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
         quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
@@ -760,7 +759,6 @@ def calculate_memory_trend(
         workload (str): The name of the workload (e.g., myapp).
         workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
-        target_replicas (float): The target replica count.
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
         offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
         quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
@@ -826,7 +824,7 @@ def calculate_memory_requests(
         workload (str): The name of the workload (e.g., myapp).
         workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
-        target_replicas (float): The target replica count.
+        target_replicas (int): The target replica count.
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
         offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
         quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
@@ -894,7 +892,7 @@ def calculate_memory_limits(
         workload (str): The name of the workload (e.g., myapp).
         workload_type (str): The type of workload (e.g., deployment,daemonset,statefulset).
         container_name (str): The name of the container.
-        target_replicas (float): The target replica count.
+        target_replicas (int): The target replica count.
         lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
         offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
         quantile_over_time (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
@@ -1036,8 +1034,7 @@ def get_oom_killed_history(
         workload (str): The name of the workload (e.g., myapp).
         container (str): The name of the container.
         workload_type (str, optional): The type of workload. Default is "deployment".
-        lookback_minutes (int, optional): The number of minutes to look back in time for historical data.
-                                         Default is the value of DEFAULT_LOOKBACK_MINUTES.
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
 
     Returns:
         int: The count of OOM events.
@@ -1161,6 +1158,10 @@ def optimize_deployment(
 
     _logger.info("Optimizing deployment: %s" % deployment_name)
 
+    if deployment.spec.replicas == 0:
+        _logger.warn("Skipping deployment due to zero replicas: %s" % deployment_name)
+        return deployment
+
     old_resources = get_resources_from_deployment(deployment)
     lookback_minutes = DEFAULT_LOOKBACK_MINUTES
     offset_minutes = DEFAULT_OFFSET_MINUTES
@@ -1245,8 +1246,8 @@ def optimize_container(
     workload: str,
     container: V1Container,
     workload_type: str = "deployment",
-    target_quantile_over_time_cpu: float = DEFAULT_QUANTILE_OVER_TIME,
-    target_quantile_over_time_memory: float = DEFAULT_QUANTILE_OVER_TIME,
+    quantile_over_time_cpu: float = DEFAULT_QUANTILE_OVER_TIME,
+    quantile_over_time_memory: float = DEFAULT_QUANTILE_OVER_TIME,
     target_repliacs: int = 1,
     lookback_minutes: int = DEFAULT_LOOKBACK_MINUTES,
     offset_minutes: int = DEFAULT_OFFSET_MINUTES,
@@ -1259,10 +1260,10 @@ def optimize_container(
         workload (str): The name of the workload associated with the container.
         container (V1Container): The Kubernetes container object to be optimized.
         workload_type (str, optional): The type of workload (e.g., "deployment"). Default is "deployment".
-        target_ratio_cpu (float, optional): The target ratio for CPU optimization. Default is 1.
-        target_ratio_memory (float, optional): The target ratio for memory optimization. Default is 1.
-        lookback_minutes (int, optional): The lookback minutes for historical data. Default is DEFAULT_LOOKBACK_MINUTES.
-        current_replicas (int, optional): The current number of replicas. Default is 1.
+        quantile_over_time_cpu (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+        quantile_over_time_memory (float, optional): The quantile value for the query. Default is DEFAULT_QUANTILE_OVER_TIME.
+        lookback_minutes (int, optional): The number of minutes to look back in time for the query. Default is DEFAULT_LOOKBACK_MINUTES.
+        offset_minutes (int, optional): The offset in minutes for the query. Default is DEFAULT_OFFSET_MINUTES.
 
     Returns:
         V1Container: The optimized Kubernetes container object.
@@ -1279,6 +1280,7 @@ def optimize_container(
     _logger.info("Processing container: %s" % container_name)
 
     old_cpu = get_cpu_requests_from_container(container)
+
     new_cpu, changed_cpu = optimize_container_cpu_requests(
         namespace_name,
         workload,
@@ -1287,7 +1289,7 @@ def optimize_container(
         target_repliacs,
         lookback_minutes,
         offset_minutes,
-        target_quantile_over_time_cpu,
+        quantile_over_time_cpu,
     )
     old_memory = get_memory_requests_from_container(container)
     new_memory, changed_memory = optimize_container_memory_requests(
@@ -1298,7 +1300,7 @@ def optimize_container(
         target_repliacs,
         lookback_minutes,
         offset_minutes,
-        target_quantile_over_time_memory,
+        quantile_over_time_memory,
     )
     old_memory_limit = get_memory_limits_from_container(container)
     new_memory_limit, changed_memory_limit = optimize_container_memory_limits(
@@ -1455,6 +1457,7 @@ def optimize_container_cpu_requests(
         new_cpu = optimize_container_cpu_requests(namespace_name, workload, container)
     """
     container_name = container.name
+    _logger.debug("Optimizingg container cpu requests: %s" % container_name)
 
     try:
         _logger.debug(container.resources.requests["cpu"])
@@ -1515,6 +1518,7 @@ def optimize_container_memory_requests(
         workload_type (str, optional): The type of workload. Defaults to "deployment".
         target_ratio (float, optional): The target ratio for memory optimization. Defaults to 1.
         lookback_minutes (int, optional): The number of minutes to look back for resource usage data. Defaults to DEFAULT_LOOKBACK_MINUTES.
+        offset_minutes (int, optional): The number of minutes to look back for resource usage data. Defaults to offset_minutes.
 
     Returns:
         int: The new memory request in bytes.
@@ -1527,6 +1531,7 @@ def optimize_container_memory_requests(
         new_memory = optimize_container_memory_requests(namespace_name, workload, container)
     """
     container_name = container.name
+    _logger.debug("Optimizingg container memory requests: %s" % container_name)
 
     try:
         _logger.debug(container.resources.requests["memory"])
@@ -1595,6 +1600,7 @@ def optimize_container_memory_limits(
         new_memory_limit = optimize_container_memory_limits(namespace_name, workload, container)
     """
     container_name = container.name
+    _logger.debug("Optimizingg container memory limits: %s" % container_name)
 
     try:
         old_memory_limit = helpers.convert_memory_request_to_bytes(
@@ -1883,7 +1889,9 @@ def main(args):
                 )
             except Exception as e:
                 _logger.warning(
-                    "An error occurred while optimizing the deployment: %s", str(e)
+                    "An error occurred while optimizing the deployment: %s",
+                    str(e),
+                    traceback.format_exc(),
                 )
 
     extra = {}
