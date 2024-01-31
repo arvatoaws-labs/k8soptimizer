@@ -1,0 +1,24 @@
+{{- range $profilName, $profilData := $.Values.profiles }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "k8soptimizer.fullname" $ }}-{{ $profilName }}
+  labels:
+    {{- include "k8soptimizer.labels" $ | nindent 4 }}
+data:
+
+{{- $myDict := dict }}
+{{- range $key, $value := $.Values.profiles.default.env  }}
+{{- $_ := set $myDict $key $value -}}
+{{- end }}
+
+{{- range $key, $value := $profilData.env  }}
+{{- $_ := set $myDict $key $value -}}
+{{- end }}
+
+{{- range $key, $value := $myDict }}
+  {{ $key }}: {{ $value | quote -}}
+{{ end }}
+
+{{- end }}

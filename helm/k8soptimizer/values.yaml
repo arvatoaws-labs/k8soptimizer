@@ -1,0 +1,99 @@
+# Default values for k8soptimizer.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/arvatoaws-labs/k8soptimizer
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+
+resources:
+  limits:
+    memory: 256Mi
+  requests:
+    cpu: 10m
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+profiles:
+  default:
+    enabled: false
+    schedule: "0 */4 * * *"
+    env:
+      LOG_LEVEL: INFO
+      LOG_FORMAT: json
+      DRY_RUN_MODE: "true"
+      PROMETHEUS_URL: "http://prometheus-operator-kube-p-prometheus.monitoring.svc.cluster.local:9090"
+      NAMESPACE_PATTERN: "default"
+      #NAMESPACE_PATTERN: ".*"
+      DEPLOYMENT_PATTERN: ".*"
+      CONTAINER_PATTERN: ".*"
+      DEFAULT_LOOKBACK_MINUTES: "240"
+      DEFAULT_OFFSET_MINUTES: "9840"
+      DEFAULT_QUANTILE_OVER_TIME: "0.95"
+      DEFAULT_QUANTILE_OVER_TIME_STATIC_CPU: "0.95"
+      DEFAULT_QUANTILE_OVER_TIME_HPA_CPU: "0.7"
+      DEFAULT_QUANTILE_OVER_TIME_STATIC_MEMORY: "0.95"
+      DEFAULT_QUANTILE_OVER_TIME_HPA_MEMORY: "0.8"
+      MIN_CPU_REQUEST: "0.010"
+      MAX_CPU_REQUEST: "16"
+      MAX_CPU_REQUEST_NODEJS: "1.0"
+      CPU_REQUEST_RATIO: "1.0"
+      MIN_MEMORY_REQUEST: "16777216"
+      MAX_MEMORY_REQUEST: "17179869184"
+      MEMORY_REQUEST_RATIO: "1.5"
+      MEMORY_LIMIT_RATIO: "2.0"
+      MIN_MEMORY_LIMIT: "33554432"
+      MAX_MEMORY_LIMIT: "34359738368"
+      CHANGE_THRESHOLD: "0.1"
+      HPA_TARGET_REPLICAS_RATIO: "0.1"
+      TREND_LOOKBOOK_MINUTES: "240"
+      TREND_OFFSET_MINUTES: "10080"
+      TREND_MAX_RATIO: "1.5"
+      TREND_MIN_RATIO: "0.5"
+      TREND_QUANTILE_OVER_TIME: "0.8"
+  wordpress-php-fpm:
+    enabled: true
+    schedule: "0 */4 * * *"
+    env:
+      NAMESPACE_PATTERN: "^wp.*"
+      CONTAINER_PATTERN: "^wordpress-bedrock-php-fpm$"
+      MEMORY_LIMIT_RATIO: "3"

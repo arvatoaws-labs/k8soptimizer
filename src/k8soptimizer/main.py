@@ -26,7 +26,7 @@ import logging
 import os
 import re
 import sys
-import traceback
+import time
 
 import requests
 from beartype import beartype
@@ -89,13 +89,21 @@ CLUSTER_RUN_MODE = os.getenv("CLUSTER_RUN_MODE", "false").lower() in [
 ]
 
 MIN_CPU_REQUEST = float(
-    os.getenv("MIN_CPU_REQUEST", 0.010)
+    helpers.convert_cpu_request_to_cores(os.getenv("MIN_CPU_REQUEST", "10m"))
 )  # below 10m will not work reliable with hpa
-MAX_CPU_REQUEST = float(os.getenv("MAX_CPU_REQUEST", 16))
+MAX_CPU_REQUEST = float(
+    helpers.convert_cpu_request_to_cores(os.getenv("MAX_CPU_REQUEST", "16"))
+)
 MAX_CPU_REQUEST_NODEJS = 1.0
 CPU_REQUEST_RATIO = float(os.getenv("CPU_REQUEST_RATIO", 1.0))
-MIN_MEMORY_REQUEST = int(os.getenv("MIN_MEMORY_REQUEST", 1024**2 * 16))
-MAX_MEMORY_REQUEST = int(os.getenv("MAX_MEMORY_REQUEST", 1024**3 * 16))
+
+MIN_MEMORY_REQUEST = int(
+    helpers.convert_memory_request_to_bytes(os.getenv("MIN_MEMORY_REQUEST", "16Mi"))
+)
+MAX_MEMORY_REQUEST = int(
+    helpers.convert_memory_request_to_bytes(os.getenv("MAX_MEMORY_REQUEST", "16Gi"))
+)
+
 MEMORY_REQUEST_RATIO = float(os.getenv("MEMORY_REQUEST_RATIO", 1.5))
 MEMORY_LIMIT_RATIO = float(os.getenv("MEMORY_LIMIT_RATIO", 2.0))
 MIN_MEMORY_LIMIT = int(
@@ -113,6 +121,8 @@ TREND_MAX_RATIO = float(os.getenv("TREND_MAX_RATIO", 1.5))
 TREND_MIN_RATIO = float(os.getenv("TREND_MIN_RATIO", 0.5))
 TREND_QUANTILE_OVER_TIME = float(os.getenv("TREND_QUANTILE_OVER_TIME", 0.8))
 
+DELAY_BETWEEN_UPDATES = float(os.getenv("DELAY_BETWEEN_UPDATES", 0.0))
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "json").lower()
 
@@ -123,7 +133,6 @@ stats["old_memory_sum"] = 0
 stats["new_memory_sum"] = 0
 stats["old_memory_limits_sum"] = 0
 stats["new_memory_limits_sum"] = 0
-
 
 # ---- Python API ----
 # The functions defined in this section can be imported by users in their
@@ -600,12 +609,16 @@ def calculate_target_replicas(deployment: V1Deployment) -> int:
         _logger.debug("Hpa not found for: %s" % deployment.metadata.name)
         return deployment.spec.replicas
 
-    targets = hpa.spec.max_replicas * HPA_TARGET_REPLICAS_RATIO
+    target_replicas = hpa.spec.max_replicas * HPA_TARGET_REPLICAS_RATIO
+
+    _logger.debug("Target replicas before limits: %s" % target_replicas)
+    _logger.debug("Hpa min replicas: %s" % hpa.spec.min_replicas)
+    _logger.debug("Hpa max replicas: %s" % hpa.spec.max_replicas)
 
     return round(
         max(
             hpa.spec.min_replicas,
-            min(hpa.spec.max_replicas, targets),
+            min(hpa.spec.max_replicas, target_replicas),
         )
     )
 
@@ -1187,6 +1200,8 @@ def optimize_deployment(
             "container": container_name,
         }
         _logger.addFilter(AppFilter(extra))
+
+        _logger.debug("Filtering containers using pattern: %s" % container_pattern)
         x = re.search(container_pattern, container_name)
         if x is None:
             _logger.debug(
@@ -1798,7 +1813,7 @@ def parse_args(args):
     group_cs.add_argument(
         "--container-pattern",
         action="store",
-        default=DEPLOYMENT_PATTERN,
+        default=CONTAINER_PATTERN,
         help="Set container pattern (regex)",
         dest="container_pattern",
         type=helpers.valid_regex_arg,
@@ -1868,14 +1883,15 @@ def main(args):
     container_pattern = args.container_pattern
     if args.container is not None:
         container_pattern = "^{}$".format(args.container)
+
     lookback_minutes = args.lookback_minutes
     offset_minutes = args.offsett_minutes
-    _logger.info("Using namespace_pattern: {}".format(namespace_pattern))
-    _logger.info("Using deplopyment_pattern: {}".format(deplopyment_pattern))
-    _logger.info("Using container_pattern: {}".format(container_pattern))
-    _logger.info("Using lookback_minutes: {}".format(lookback_minutes))
-    _logger.info("Using offset_minutes: {}".format(offset_minutes))
-    _logger.info("Using dry_run: {}".format(args.dry_run))
+    _logger.info("Using namespace_pattern: %s" % namespace_pattern)
+    _logger.info("Using deplopyment_pattern: %s" % deplopyment_pattern)
+    _logger.info("Using container_pattern: %s" % container_pattern)
+    _logger.info("Using lookback_minutes: %s" % lookback_minutes)
+    _logger.info("Using offset_minutes: %s" % offset_minutes)
+    _logger.info("Using dry_run: %s" % args.dry_run)
     _logger.info("Using cpu request ratio: %s" % CPU_REQUEST_RATIO)
     _logger.info("Using memory request ratio: %s" % MEMORY_REQUEST_RATIO)
     _logger.info("Using memory limit ratio: %s" % MEMORY_LIMIT_RATIO)
@@ -1895,11 +1911,11 @@ def main(args):
                     offset_minutes,
                     args.dry_run,
                 )
+                time.sleep(DELAY_BETWEEN_UPDATES)
             except Exception as e:
                 _logger.warning(
-                    "An error occurred while optimizing the deployment: %s",
-                    str(e),
-                    traceback.format_exc(),
+                    "An error occurred while optimizing the deployment: %s" % str(e),
+                    exc_info=True,
                 )
 
     extra = {}

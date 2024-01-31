@@ -27,6 +27,7 @@ def convert_memory_request_to_bytes(size: str) -> int:
         size_in_bytes = convert_memory_request_to_bytes('2Gi')
     """
     units = {
+        "": 1,
         "B": 1,
         "K": 1024,
         "M": 1024**2,
@@ -38,7 +39,7 @@ def convert_memory_request_to_bytes(size: str) -> int:
         "Ti": 1024**4,
     }
 
-    pattern = r"(\d+(\.\d+)?)\s*([a-zA-Z]+)"
+    pattern = r"(\d+(\.\d+)?)\s*([a-zA-Z]*)"
     match = re.match(pattern, size)
 
     if match:

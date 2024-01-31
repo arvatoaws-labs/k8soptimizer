@@ -1,0 +1,66 @@
+{{- range $profilName, $profilData := $.Values.profiles }}
+
+
+{{- $myDict := dict }}
+{{- range $key, $value := $.Values.profiles.default.env  }}
+{{- $_ := set $myDict $key $value -}}
+{{- end }}
+
+{{- range $key, $value := $profilData.env  }}
+{{- $_ := set $myDict $key $value -}}
+{{- end }}
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "k8soptimizer.fullname" $ }}-{{ $profilName }}
+  labels:
+    {{- include "k8soptimizer.labels" $ | nindent 4 }}
+spec:
+  schedule: {{ $profilData.schedule }}
+  {{- if eq $profilData.enabled false }}
+  suspend: true
+  {{- end }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          securityContext:
+            {{- toYaml $.Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: k8soptimizer
+              image: "{{ $.Values.image.repository }}:{{ $.Values.image.tag | default $.Chart.AppVersion }}"
+              imagePullPolicy: {{ $.Values.image.pullPolicy }}
+              securityContext:
+                {{- toYaml $.Values.securityContext | nindent 16 }}
+              env:
+                - name: CLUSTER_RUN_MODE
+                  value: "true"
+{{- range $key, $value := $myDict }}
+                - name: {{ $key }}
+                  valueFrom:
+                    configMapKeyRef:
+                      name: {{ include "k8soptimizer.fullname" $ }}-{{ $profilName }}
+                      key: {{ $key -}}
+{{ end }}
+              resources:
+                {{- toYaml $.Values.resources | nindent 16 }}
+          restartPolicy: Never
+          {{- with $.Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 8 }}
+          {{- end }}
+          serviceAccountName: {{ include "k8soptimizer.serviceAccountName" $ }}
+          {{- with $.Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $.Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

@@ -11,6 +11,7 @@ __license__ = "MIT"
 
 
 def test_convert_memory_request_to_bytes():
+    assert helpers.convert_memory_request_to_bytes("1") == 1
     assert helpers.convert_memory_request_to_bytes("1B") == 1
     assert helpers.convert_memory_request_to_bytes("1K") == 1024
     assert helpers.convert_memory_request_to_bytes("1M") == 1024**2
