@@ -39,17 +39,17 @@ def convert_memory_request_to_bytes(size: str) -> int:
         "Ti": 1024**4,
     }
 
-    pattern = r"(\d+(\.\d+)?)\s*([a-zA-Z]*)"
+    pattern = r"((\d+)(\.\d+)?)([a-zA-Z]*)?"
     match = re.match(pattern, size)
 
     if match:
         value = float(match.group(1))
-        unit = match.group(3)
+        unit = match.group(4)
     else:
         raise ValueError("Invalid format: {}".format(size))
 
     if unit not in units:
-        raise ValueError("Invalid unit: {}".format(unit))
+        raise ValueError("Invalid unit: {}, got size: {}".format(unit, size))
 
     bytes_value = value * units[unit]
     return int(bytes_value)
@@ -74,17 +74,17 @@ def convert_cpu_request_to_cores(size: str) -> float:
     """
     units = {"m": 1 / 1000, "k": 1000, "": 1}
 
-    pattern = r"(\d+\.?\d?)(.*)?"
+    pattern = r"((\d+)(\.\d+)?)([a-zA-Z]*)?"
     match = re.match(pattern, size)
 
     if match:
         value = float(match.group(1))
-        unit = match.group(2)
+        unit = match.group(4)
     else:
         raise ValueError("Invalid format: {}".format(size))
 
     if unit not in units:
-        raise ValueError("Invalid unit: {}".format(unit))
+        raise ValueError("Invalid unit: {}, got size: {}".format(unit, size))
 
     bytes_value = value * units[unit]
     return float(bytes_value)
