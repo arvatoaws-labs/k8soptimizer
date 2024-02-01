@@ -36,6 +36,8 @@ def test_convert_cpu_request_to_cores():
     assert helpers.convert_cpu_request_to_cores("1000k") == 1000000
     assert helpers.convert_cpu_request_to_cores("1") == 1
     assert helpers.convert_cpu_request_to_cores("0.5") == 0.5
+    assert helpers.convert_cpu_request_to_cores("0.01") == 0.01
+    assert helpers.convert_cpu_request_to_cores("0.010") == 0.01
 
     with pytest.raises(ValueError) as exc_info:
         helpers.convert_cpu_request_to_cores("1z")
