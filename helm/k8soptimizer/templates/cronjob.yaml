@@ -1,6 +1,5 @@
 {{- range $profilName, $profilData := $.Values.profiles }}
 
-
 {{- $myDict := dict }}
 {{- range $key, $value := $.Values.profiles.default.env  }}
 {{- $_ := set $myDict $key $value -}}
@@ -9,7 +8,7 @@
 {{- range $key, $value := $profilData.env  }}
 {{- $_ := set $myDict $key $value -}}
 {{- end }}
-
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:
