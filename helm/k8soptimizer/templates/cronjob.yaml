@@ -33,8 +33,6 @@ spec:
               securityContext:
                 {{- toYaml $.Values.securityContext | nindent 16 }}
               env:
-                - name: CLUSTER_RUN_MODE
-                  value: "true"
 {{- range $key, $value := $myDict }}
                 - name: {{ $key }}
                   valueFrom:
