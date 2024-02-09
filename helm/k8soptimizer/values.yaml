@@ -90,10 +90,3 @@ profiles:
       TREND_MAX_RATIO: "1.5"
       TREND_MIN_RATIO: "0.5"
       TREND_QUANTILE_OVER_TIME: "0.8"
-  wordpress-php-fpm:
-    enabled: true
-    schedule: "0 */4 * * *"
-    env:
-      NAMESPACE_PATTERN: "^wp.*"
-      CONTAINER_PATTERN: "^wordpress-bedrock-php-fpm$"
-      MEMORY_LIMIT_RATIO: "3"

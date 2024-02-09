@@ -1,0 +1,15 @@
+profiles:
+  wordpress-php-fpm:
+    enabled: true
+    schedule: "0 */4 * * *"
+    env:
+      NAMESPACE_PATTERN: "^wp.*"
+      CONTAINER_PATTERN: "^wordpress-bedrock-php-fpm$"
+      MEMORY_LIMIT_RATIO: "3"
+  wordpress-nginx:
+    enabled: true
+    schedule: "15 */4 * * *"
+    env:
+      NAMESPACE_PATTERN: "^wp.*"
+      CONTAINER_PATTERN: "^wordpress-bedrock-nginx$"
+      MEMORY_LIMIT_RATIO: "2"
