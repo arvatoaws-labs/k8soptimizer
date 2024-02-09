@@ -61,6 +61,7 @@ profiles:
       LOG_LEVEL: INFO
       LOG_FORMAT: json
       DRY_RUN_MODE: "true"
+      CLUSTER_RUN_MODE: "true"
       PROMETHEUS_URL: "http://prometheus-operator-kube-p-prometheus.monitoring.svc.cluster.local:9090"
       NAMESPACE_PATTERN: "default"
       #NAMESPACE_PATTERN: ".*"
