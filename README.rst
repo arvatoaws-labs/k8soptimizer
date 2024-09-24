@@ -69,6 +69,7 @@ Features
 - Highly tested code using the Pytest framework.
 - Can be executed as a Docker image.
 - Supports configuration through environment variables.
+- Helm Chart to run the k8skoptimizer as a cronjob in k8s
 
 Differences between VPA
 --------
@@ -87,13 +88,10 @@ Known issues
 
 Future ideas
 --------
-
-- Helm Chart to run the k8skoptimizer as a cronjob in k8s
 - Support for auto discovery of additional runtimes whith specific limitations (python does not consume more than 1 core)
 - Support for jvm discovery, maybe the memory request can be reduced (right now a java app would not lower memory consumption because it takes all it can get)
 - Support for statefulesets and daemonsets
 - Support for kubernetes events (to see oom kills and others useful events)
-- Store recommendations in a configmap and use it for helm deployment
 - Dynamic configuration based on namespace or object annotations
 - Admission controller mode
 - Better logging and alerting
