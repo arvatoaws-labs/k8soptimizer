@@ -1,57 +1,219 @@
-# .github/workflows/build.yml
-
-name: Build and publish docker image
+name: build
 
 on:
+  workflow_dispatch:
   push:
     branches:
     - dev
-    - main
+    - master
   schedule:
-  - cron: '30 12 * * 3'
+  - cron: '30 12 * * *'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  arm64:
+    runs-on: arvato
+    outputs:
+      image-digest-prod: ${{ steps.build-arm64-prod.outputs.digest }}
+      image-digest-dev: ${{ steps.build-arm64-dev.outputs.digest }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v5
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
+      uses: actions/checkout@v6
       with:
-        platforms: all
-    - name: Set up Docker Buildx
-      id: buildx
-      uses: docker/setup-buildx-action@v3
+        fetch-depth: 1
+    - name: Docker meta Dev
+      id: meta-arm64-dev
+      if: github.ref == 'refs/heads/dev'
+      uses: docker/metadata-action@v5
       with:
-        install: true
-        version: latest
-        driver-opts: image=moby/buildkit:master
+        images: ghcr.io/arvatoaws-labs/k8soptimizer
+        flavor: |
+          latest=false
+          suffix=-arm64
+        tags: |
+          type=schedule,pattern={{date 'YYYYMMDD-hhmmss' tz='Europe/Berlin'}},prefix=dev-
+          type=sha,format=short,prefix=dev-sha-
+          type=semver,pattern={{version}},prefix=dev-
+          type=semver,pattern={{major}}.{{minor}},prefix=dev-
+          type=semver,pattern={{major}},prefix=dev-
+          type=ref,event=branch,prefix=dev-branch-
+          type=ref,event=tag,prefix=dev-tag-
+          type=ref,event=pr,prefix=dev-pr-
+          type=raw,value=dev
+    - name: Docker meta Prod
+      id: meta-arm64-prod
+      if: github.ref == 'refs/heads/master'
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/arvatoaws-labs/k8soptimizer
+        flavor: |
+          latest=true
+          suffix=-arm64
+        tags: |
+          type=schedule,pattern={{date 'YYYYMMDD-hhmmss' tz='Europe/Berlin'}}
+          type=sha,format=short,prefix=sha-
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=ref,event=branch,prefix=branch-
+          type=ref,event=tag,prefix=tag-
+          type=ref,event=pr,prefix=pr-
     - name: Login to GitHub Packages Docker Registry
       uses: docker/login-action@v3
       with:
         registry: ghcr.io
         username: ${{github.actor}}
         password: ${{ secrets.GITHUB_TOKEN }}
-        #username: jenkins-arvato
-        #password: ${{ secrets.CR_PAT }}
     - name: Build and Push Latest
+      id: build-arm64-prod
       uses: docker/build-push-action@v6
-      if: github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/master'
       with:
-        platforms: linux/amd64,linux/arm64
         push: true
         pull: true
-        tags: ghcr.io/arvatoaws-labs/k8soptimizer:latest
-        cache-from: type=registry,ref=ghcr.io/arvatoaws-labs/k8soptimizer:latest
-        cache-to: type=inline
+        tags: ${{ steps.meta-arm64-prod.outputs.tags }}
     - name: Build and Push Dev
+      id: build-arm64-dev
       uses: docker/build-push-action@v6
       if: github.ref == 'refs/heads/dev'
       with:
-        platforms: linux/amd64,linux/arm64
         push: true
         pull: true
-        tags: ghcr.io/arvatoaws-labs/k8soptimizer:dev
-        cache-from: type=registry,ref=ghcr.io/arvatoaws-labs/k8soptimizer:dev
-        cache-to: type=inline
+        tags: ${{ steps.meta-arm64-dev.outputs.tags }}
+  amd64:
+    runs-on: arvato-x86
+    outputs:
+      image-digest-prod: ${{ steps.build-amd64-prod.outputs.digest }}
+      image-digest-dev: ${{ steps.build-amd64-dev.outputs.digest }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+    - name: Login to GitHub Packages Docker Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{github.actor}}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Docker meta Dev
+      id: meta-amd64-dev
+      if: github.ref == 'refs/heads/dev'
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/arvatoaws-labs/k8soptimizer
+        flavor: |
+          latest=false
+          suffix=-amd64
+        tags: |
+          type=schedule,pattern={{date 'YYYYMMDD-hhmmss' tz='Europe/Berlin'}},prefix=dev-
+          type=sha,format=short,prefix=dev-sha-
+          type=semver,pattern={{version}},prefix=dev-
+          type=semver,pattern={{major}}.{{minor}},prefix=dev-
+          type=semver,pattern={{major}},prefix=dev-
+          type=ref,event=branch,prefix=dev-branch-
+          type=ref,event=tag,prefix=dev-tag-
+          type=ref,event=pr,prefix=dev-pr-
+          type=raw,value=dev
+    - name: Docker meta Prod
+      id: meta-amd64-prod
+      if: github.ref == 'refs/heads/master'
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/arvatoaws-labs/k8soptimizer
+        flavor: |
+          latest=true
+          suffix=-amd64
+        tags: |
+          type=schedule,pattern={{date 'YYYYMMDD-hhmmss' tz='Europe/Berlin'}}
+          type=sha,format=short,prefix=sha-
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=ref,event=branch,prefix=branch-
+          type=ref,event=tag,prefix=tag-
+          type=ref,event=pr,prefix=pr-
+    - name: Build and Push Latest
+      id: build-amd64-prod
+      uses: docker/build-push-action@v6
+      if: github.ref == 'refs/heads/master'
+      with:
+        push: true
+        pull: true
+        tags: ${{ steps.meta-amd64-prod.outputs.tags }}
+    - name: Build and Push Dev
+      id: build-amd64-dev
+      uses: docker/build-push-action@v6
+      if: github.ref == 'refs/heads/dev'
+      with:
+        push: true
+        pull: true
+        tags: ${{ steps.meta-amd64-dev.outputs.tags }}
+  manifest:
+    runs-on: arvato
+    needs: [arm64, amd64]
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1
+    - name: Docker meta Dev
+      id: meta-dev
+      if: github.ref == 'refs/heads/dev'
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/arvatoaws-labs/k8soptimizer
+        flavor: |
+          latest=false
+        tags: |
+          type=schedule,pattern={{date 'YYYYMMDD-hhmmss' tz='Europe/Berlin'}},prefix=dev-
+          type=sha,format=short,prefix=dev-sha-
+          type=semver,pattern={{version}},prefix=dev-
+          type=semver,pattern={{major}}.{{minor}},prefix=dev-
+          type=semver,pattern={{major}},prefix=dev-
+          type=ref,event=branch,prefix=dev-branch-
+          type=ref,event=tag,prefix=dev-tag-
+          type=ref,event=pr,prefix=dev-pr-
+          type=raw,value=dev
+    - name: Docker meta Prod
+      id: meta-prod
+      if: github.ref == 'refs/heads/master'
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/arvatoaws-labs/k8soptimizer
+        flavor: |
+          latest=true
+        tags: |
+          type=schedule,pattern={{date 'YYYYMMDD-hhmmss' tz='Europe/Berlin'}}
+          type=sha,format=short,prefix=sha-
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=ref,event=branch,prefix=branch-
+          type=ref,event=tag,prefix=tag-
+          type=ref,event=pr,prefix=pr-
+    - name: Login to GitHub Packages Docker Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{github.actor}}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Create Docker Manifest for Dev
+      uses: int128/docker-manifest-create-action@v2
+      id: build-dev
+      if: github.ref == 'refs/heads/dev'
+      with:
+        index-annotations: ${{ steps.meta-dev.outputs.labels }}
+        tags: ${{ steps.meta-dev.outputs.tags }}
+        sources: |
+          ghcr.io/arvatoaws-labs/k8soptimizer@${{ needs.arm64.outputs.image-digest-dev }}
+          ghcr.io/arvatoaws-labs/k8soptimizer@${{ needs.amd64.outputs.image-digest-dev }}
+    - name: Create Docker Manifest for Prod
+      uses: int128/docker-manifest-create-action@v2
+      id: build-prod
+      if: github.ref == 'refs/heads/master'
+      with:
+        index-annotations: ${{ steps.meta-prod.outputs.labels }}
+        tags: ${{ steps.meta-prod.outputs.tags }}
+        sources: |
+          ghcr.io/arvatoaws-labs/k8soptimizer@${{ needs.arm64.outputs.image-digest-prod }}
+          ghcr.io/arvatoaws-labs/k8soptimizer@${{ needs.amd64.outputs.image-digest-prod }}
