@@ -58,7 +58,7 @@ jobs:
           type=ref,event=tag,prefix=tag-
           type=ref,event=pr,prefix=pr-
     - name: Login to GitHub Packages Docker Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{github.actor}}
@@ -90,7 +90,7 @@ jobs:
       with:
         fetch-depth: 1
     - name: Login to GitHub Packages Docker Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{github.actor}}
@@ -192,7 +192,7 @@ jobs:
           type=ref,event=tag,prefix=tag-
           type=ref,event=pr,prefix=pr-
     - name: Login to GitHub Packages Docker Registry
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ghcr.io
         username: ${{github.actor}}
