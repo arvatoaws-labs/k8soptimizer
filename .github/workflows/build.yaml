@@ -65,7 +65,7 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Build and Push Latest
       id: build-arm64-prod
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       if: github.ref == 'refs/heads/master'
       with:
         push: true
@@ -73,7 +73,7 @@ jobs:
         tags: ${{ steps.meta-arm64-prod.outputs.tags }}
     - name: Build and Push Dev
       id: build-arm64-dev
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       if: github.ref == 'refs/heads/dev'
       with:
         push: true
@@ -134,7 +134,7 @@ jobs:
           type=ref,event=pr,prefix=pr-
     - name: Build and Push Latest
       id: build-amd64-prod
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       if: github.ref == 'refs/heads/master'
       with:
         push: true
@@ -142,7 +142,7 @@ jobs:
         tags: ${{ steps.meta-amd64-prod.outputs.tags }}
     - name: Build and Push Dev
       id: build-amd64-dev
-      uses: docker/build-push-action@v6
+      uses: docker/build-push-action@v7
       if: github.ref == 'refs/heads/dev'
       with:
         push: true
