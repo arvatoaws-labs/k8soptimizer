@@ -17,7 +17,7 @@ jobs:
       image-digest-dev: ${{ steps.build-arm64-dev.outputs.digest }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 1
     - name: Docker meta Dev
@@ -86,7 +86,7 @@ jobs:
       image-digest-dev: ${{ steps.build-amd64-dev.outputs.digest }}
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 1
     - name: Login to GitHub Packages Docker Registry
@@ -153,7 +153,7 @@ jobs:
     needs: [arm64, amd64]
     steps:
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         fetch-depth: 1
     - name: Docker meta Dev
